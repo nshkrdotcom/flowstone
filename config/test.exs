@@ -11,7 +11,10 @@ config :flowstone, FlowStone.Repo,
 
 config :flowstone,
   io_managers: %{
-    memory: FlowStone.IO.Memory
+    memory: FlowStone.IO.Memory,
+    postgres: FlowStone.IO.Postgres,
+    s3: FlowStone.IO.S3,
+    parquet: FlowStone.IO.Parquet
   },
   default_io_manager: :memory
 
