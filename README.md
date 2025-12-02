@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/flowstone.svg" alt="FlowStone Logo" width="220" height="248">
+</p>
+
 # FlowStone
 
 **Asset-first orchestration for the BEAM.**
