@@ -1,5 +1,5 @@
 defmodule FlowStoneTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   defmodule Pipeline do
     use FlowStone.Pipeline

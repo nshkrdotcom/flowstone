@@ -1,5 +1,5 @@
 defmodule FlowStone.IOTelemetryTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   test "emits telemetry around load/store" do
     {:ok, _} = start_supervised({FlowStone.IO.Memory, name: :telemetry_mem})

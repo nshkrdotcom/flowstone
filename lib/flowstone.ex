@@ -38,7 +38,10 @@ defmodule FlowStone do
     partition = Keyword.fetch!(opts, :partition)
     registry = Keyword.get(opts, :registry, Registry)
     io_opts = Keyword.get(opts, :io, [])
+    use_repo = Keyword.get(opts, :use_repo, true)
     resource_server = Keyword.get(opts, :resource_server, nil)
+    lineage_server = Keyword.get(opts, :lineage_server, nil)
+    materialization_store = Keyword.get(opts, :materialization_store, nil)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
     job = %Oban.Job{
@@ -48,11 +51,48 @@ defmodule FlowStone do
         "registry" => registry,
         "io" => io_opts,
         "resource_server" => resource_server,
-        "run_id" => run_id
+        "lineage_server" => lineage_server,
+        "materialization_store" => materialization_store,
+        "run_id" => run_id,
+        "use_repo" => use_repo
       }
     }
 
     FlowStone.Workers.AssetWorker.perform(job)
+  end
+
+  @doc """
+  Enqueue materialization via Oban if running; otherwise performs synchronously.
+  """
+  def materialize_async(asset, opts) do
+    partition = Keyword.fetch!(opts, :partition)
+    registry = Keyword.get(opts, :registry, Registry)
+    io_opts = Keyword.get(opts, :io, [])
+    use_repo = Keyword.get(opts, :use_repo, true)
+    resource_server = Keyword.get(opts, :resource_server, nil)
+    lineage_server = Keyword.get(opts, :lineage_server, nil)
+    materialization_store = Keyword.get(opts, :materialization_store, nil)
+    run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
+
+    args = %{
+      "asset_name" => Atom.to_string(asset),
+      "partition" => partition,
+      "registry" => registry,
+      "io" => io_opts,
+      "resource_server" => resource_server,
+      "lineage_server" => lineage_server,
+      "materialization_store" => materialization_store,
+      "run_id" => run_id,
+      "use_repo" => use_repo
+    }
+
+    case oban_running?() do
+      true ->
+        FlowStone.Workers.AssetWorker.new(args) |> Oban.insert()
+
+      false ->
+        FlowStone.Workers.AssetWorker.perform(%Oban.Job{args: args})
+    end
   end
 
   @doc """
@@ -63,6 +103,7 @@ defmodule FlowStone do
     io_opts = Keyword.get(opts, :io, [])
     resource_server = Keyword.get(opts, :resource_server, nil)
     partition = Keyword.fetch!(opts, :partition)
+    use_repo = Keyword.get(opts, :use_repo, true)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
     assets = Registry.list(server: registry)
@@ -76,6 +117,7 @@ defmodule FlowStone do
         registry: registry,
         io: io_opts,
         resource_server: resource_server,
+        use_repo: use_repo,
         run_id: run_id
       )
     end)
@@ -86,10 +128,16 @@ defmodule FlowStone do
   Backfill an asset across multiple partitions sequentially.
   """
   def backfill(asset, opts) do
-    partitions = Keyword.fetch!(opts, :partitions)
+    partitions =
+      opts
+      |> FlowStone.Backfill.generate()
+
     io_opts = Keyword.get(opts, :io, [])
     registry = Keyword.get(opts, :registry, Registry)
     resource_server = Keyword.get(opts, :resource_server, nil)
+    lineage_server = Keyword.get(opts, :lineage_server, nil)
+    materialization_store = Keyword.get(opts, :materialization_store, nil)
+    use_repo = Keyword.get(opts, :use_repo, true)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
     results =
@@ -99,6 +147,9 @@ defmodule FlowStone do
           registry: registry,
           io: io_opts,
           resource_server: resource_server,
+          use_repo: use_repo,
+          lineage_server: lineage_server,
+          materialization_store: materialization_store,
           run_id: run_id
         )
       end)
@@ -158,4 +209,7 @@ defmodule FlowStone do
     deps = Map.get(edges, asset_name, [])
     Enum.flat_map(deps, &dependencies_for(&1, %{edges: edges})) ++ [asset_name]
   end
+
+  defp oban_running?,
+    do: Process.whereis(Oban.Registry) != nil and Process.whereis(Oban.Config) != nil
 end

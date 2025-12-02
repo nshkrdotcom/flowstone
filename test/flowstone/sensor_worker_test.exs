@@ -1,5 +1,5 @@
 defmodule FlowStone.SensorWorkerTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   defmodule DummySensor do
     @behaviour FlowStone.Sensor

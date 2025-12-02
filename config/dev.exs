@@ -4,10 +4,8 @@ config :flowstone, FlowStone.Repo,
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
-  database: "flowstone_test",
-  pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10,
-  ownership_timeout: 60_000
+  database: "flowstone_dev",
+  pool_size: 10
 
 config :flowstone,
   start_repo: true,
@@ -18,11 +16,7 @@ config :flowstone,
 
 config :flowstone, Oban,
   repo: FlowStone.Repo,
-  testing: :inline,
   queues: [assets: 10],
-  plugins: false
+  plugins: []
 
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000, cleanup_interval_ms: 60_000]}
-
-config :logger, level: :warning
+config :logger, level: :debug

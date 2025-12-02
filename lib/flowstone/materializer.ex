@@ -4,6 +4,7 @@ defmodule FlowStone.Materializer do
   """
 
   alias FlowStone.Error
+  alias FlowStone.ErrorRecorder
 
   @spec execute(struct(), map(), map()) :: {:ok, term()} | {:error, Error.t()}
   def execute(asset, context, deps) do
@@ -15,26 +16,64 @@ defmodule FlowStone.Materializer do
           {:ok, value}
 
         {:error, %Error{} = err} ->
+          ErrorRecorder.record(err, %{
+            asset: asset.name,
+            partition: context.partition,
+            run_id: context.run_id
+          })
+
           {:error, err}
 
         {:error, reason} ->
-          {:error, Error.execution_error(asset.name, context.partition, wrap(reason), [])}
+          err = Error.execution_error(asset.name, context.partition, wrap(reason), [])
+
+          ErrorRecorder.record(err, %{
+            asset: asset.name,
+            partition: context.partition,
+            run_id: context.run_id
+          })
+
+          {:error, err}
 
         other ->
-          {:error, Error.unexpected_return(asset.name, context.partition, other)}
+          err = Error.unexpected_return(asset.name, context.partition, other)
+
+          ErrorRecorder.record(err, %{
+            asset: asset.name,
+            partition: context.partition,
+            run_id: context.run_id
+          })
+
+          {:error, err}
       end
     rescue
       exception ->
-        {:error, Error.execution_error(asset.name, context.partition, exception, __STACKTRACE__)}
+        err = Error.execution_error(asset.name, context.partition, exception, __STACKTRACE__)
+
+        ErrorRecorder.record(err, %{
+          asset: asset.name,
+          partition: context.partition,
+          run_id: context.run_id
+        })
+
+        {:error, err}
     catch
       :exit, reason ->
-        {:error,
-         Error.execution_error(
-           asset.name,
-           context.partition,
-           %RuntimeError{message: inspect(reason)},
-           []
-         )}
+        err =
+          Error.execution_error(
+            asset.name,
+            context.partition,
+            %RuntimeError{message: inspect(reason)},
+            []
+          )
+
+        ErrorRecorder.record(err, %{
+          asset: asset.name,
+          partition: context.partition,
+          run_id: context.run_id
+        })
+
+        {:error, err}
     end
   end
 
