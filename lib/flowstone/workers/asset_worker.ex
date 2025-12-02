@@ -52,6 +52,11 @@ defmodule FlowStone.Workers.AssetWorker do
     end
   end
 
+  @impl Oban.Worker
+  def backoff(%Oban.Job{attempt: attempt}) do
+    trunc(:math.pow(2, attempt)) |> max(5) |> min(300)
+  end
+
   defp check_dependencies(asset_name, partition, registry, io_opts) do
     with {:ok, asset} <- Registry.fetch(asset_name, server: registry) do
       missing =

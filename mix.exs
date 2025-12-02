@@ -83,6 +83,7 @@ defmodule FlowStone.MixProject do
       {:mox, "~> 1.1", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: :test},
+      {:crontab, "~> 1.1"},
 
       # Development
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
@@ -183,7 +184,6 @@ defmodule FlowStone.MixProject do
         Execution: [
           FlowStone.Materializer,
           FlowStone.Workers.AssetWorker,
-          FlowStone.Workers.ScheduledAsset,
           FlowStone.Workers.CheckpointTimeout
         ],
         "I/O Managers": [

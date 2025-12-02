@@ -3,7 +3,7 @@ defmodule FlowStone.Executor do
   Executes a single asset, loading dependencies and storing results via I/O managers.
   """
 
-  alias FlowStone.{Context, Error, Materializer, Registry}
+  alias FlowStone.{AuditLogContext, Context, Error, Materializer, Registry}
 
   @spec materialize(atom(), keyword()) :: {:ok, term()} | {:error, Error.t()} | {:error, term()}
   def materialize(asset_name, opts) do
@@ -39,6 +39,7 @@ defmodule FlowStone.Executor do
          {:ok, deps} <- load_dependencies(asset, partition, io_opts),
          context <- Context.build(asset, partition, run_id, resource_server: resource_server) do
       start_time = System.monotonic_time(:millisecond)
+      telemetry_start(asset.name, partition, run_id)
       record_start(asset.name, partition, run_id, mat_store, use_repo)
 
       case Materializer.execute(asset, context, deps) do
@@ -46,11 +47,14 @@ defmodule FlowStone.Executor do
           :ok = FlowStone.IO.store(asset.name, result, partition, io_opts)
           duration = System.monotonic_time(:millisecond) - start_time
           record_success(asset.name, partition, run_id, duration, mat_store, use_repo)
+          telemetry_stop(asset.name, partition, run_id, duration)
+          maybe_audit(asset.name, partition, run_id, use_repo)
           record_lineage(asset.name, partition, run_id, deps, lineage_server, use_repo)
           {:ok, result}
 
         {:error, %Error{} = err} ->
           record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
+          telemetry_exception(asset.name, partition, run_id, err)
           {:error, err}
       end
     end
@@ -101,5 +105,45 @@ defmodule FlowStone.Executor do
       store: store,
       use_repo: use_repo
     )
+  end
+
+  defp telemetry_start(asset, partition, run_id) do
+    :telemetry.execute([:flowstone, :materialization, :start], %{}, %{
+      asset: asset,
+      partition: partition,
+      run_id: run_id
+    })
+  end
+
+  defp telemetry_stop(asset, partition, run_id, duration) do
+    :telemetry.execute([:flowstone, :materialization, :stop], %{duration: duration}, %{
+      asset: asset,
+      partition: partition,
+      run_id: run_id
+    })
+  end
+
+  defp telemetry_exception(asset, partition, run_id, error) do
+    :telemetry.execute([:flowstone, :materialization, :exception], %{}, %{
+      asset: asset,
+      partition: partition,
+      run_id: run_id,
+      error: error
+    })
+  end
+
+  defp maybe_audit(asset, partition, run_id, use_repo) do
+    if use_repo do
+      AuditLogContext.log("asset.materialized",
+        actor_id: "system",
+        actor_type: "system",
+        resource_type: "asset",
+        resource_id: Atom.to_string(asset),
+        action: "materialized",
+        details: %{run_id: run_id, partition: partition}
+      )
+    else
+      :ok
+    end
   end
 end

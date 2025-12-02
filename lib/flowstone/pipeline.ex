@@ -68,6 +68,18 @@ defmodule FlowStone.Pipeline do
     end
   end
 
+  defmacro partition(fun) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | partition_fn: unquote(fun)}
+    end
+  end
+
+  defmacro partitioned_by(value) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | partitioned_by: unquote(value)}
+    end
+  end
+
   defmacro execute(fun) do
     quote do
       var!(current_asset) = %{var!(current_asset) | execute_fn: unquote(fun)}

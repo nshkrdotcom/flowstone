@@ -111,50 +111,102 @@ defmodule FlowStone do
 
     subset = dependencies_for(asset, graph)
 
-    Enum.map(subset, fn name ->
-      materialize(name,
-        partition: partition,
-        registry: registry,
-        io: io_opts,
-        resource_server: resource_server,
-        use_repo: use_repo,
-        run_id: run_id
-      )
-    end)
-    |> List.last()
+    if oban_running?() do
+      subset
+      |> Enum.map(fn name ->
+        materialize_async(name,
+          partition: partition,
+          registry: registry,
+          io: io_opts,
+          resource_server: resource_server,
+          use_repo: use_repo,
+          run_id: run_id
+        )
+      end)
+      |> List.last()
+    else
+      Enum.map(subset, fn name ->
+        materialize(name,
+          partition: partition,
+          registry: registry,
+          io: io_opts,
+          resource_server: resource_server,
+          use_repo: use_repo,
+          run_id: run_id
+        )
+      end)
+      |> List.last()
+    end
   end
 
   @doc """
   Backfill an asset across multiple partitions sequentially.
   """
   def backfill(asset, opts) do
-    partitions =
-      opts
-      |> FlowStone.Backfill.generate()
-
-    io_opts = Keyword.get(opts, :io, [])
     registry = Keyword.get(opts, :registry, Registry)
+    io_opts = Keyword.get(opts, :io, [])
     resource_server = Keyword.get(opts, :resource_server, nil)
     lineage_server = Keyword.get(opts, :lineage_server, nil)
     materialization_store = Keyword.get(opts, :materialization_store, nil)
     use_repo = Keyword.get(opts, :use_repo, true)
+    force? = Keyword.get(opts, :force, false)
+    max_parallel = Keyword.get(opts, :max_parallel, 1)
+    timeout = Keyword.get(opts, :timeout, :infinity)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
-    results =
-      Enum.map(partitions, fn partition ->
-        materialize(asset,
-          partition: partition,
-          registry: registry,
-          io: io_opts,
-          resource_server: resource_server,
-          use_repo: use_repo,
-          lineage_server: lineage_server,
-          materialization_store: materialization_store,
-          run_id: run_id
-        )
+    {:ok, asset_struct} = Registry.fetch(asset, server: registry)
+
+    backfill_opts =
+      if is_function(asset_struct.partition_fn, 1) do
+        Keyword.put_new(opts, :partition_fn, asset_struct.partition_fn)
+      else
+        opts
+      end
+
+    partitions = FlowStone.Backfill.generate(backfill_opts)
+
+    partitions_to_run =
+      Enum.reject(partitions, fn partition ->
+        not force? and
+          existing_materialization?(asset, partition, materialization_store, use_repo)
       end)
 
-    {:ok, %{run_id: run_id, partitions: partitions, results: results}}
+    results =
+      partitions_to_run
+      |> Task.async_stream(
+        fn partition ->
+          if oban_running?() do
+            materialize_async(asset,
+              partition: partition,
+              registry: registry,
+              io: io_opts,
+              resource_server: resource_server,
+              use_repo: use_repo,
+              lineage_server: lineage_server,
+              materialization_store: materialization_store,
+              run_id: run_id
+            )
+          else
+            materialize(asset,
+              partition: partition,
+              registry: registry,
+              io: io_opts,
+              resource_server: resource_server,
+              use_repo: use_repo,
+              lineage_server: lineage_server,
+              materialization_store: materialization_store,
+              run_id: run_id
+            )
+          end
+        end,
+        max_concurrency: max_parallel,
+        timeout: timeout
+      )
+      |> Enum.map(fn {:ok, res} -> res end)
+
+    skipped = partitions -- partitions_to_run
+
+    {:ok, %{run_id: run_id, partitions: partitions, skipped: skipped, results: results}}
   end
 
   @doc """
@@ -164,6 +216,11 @@ defmodule FlowStone do
     schedule = %FlowStone.Schedule{
       asset: asset,
       cron: Keyword.fetch!(opts, :cron),
+      registry: Keyword.get(opts, :registry, FlowStone.Registry),
+      io: Keyword.get(opts, :io, []),
+      resource_server: Keyword.get(opts, :resource_server, FlowStone.Resources),
+      lineage_server: Keyword.get(opts, :lineage_server, FlowStone.Lineage),
+      use_repo: Keyword.get(opts, :use_repo, true),
       timezone: Keyword.get(opts, :timezone, "UTC"),
       partition_fn: Keyword.get(opts, :partition, fn -> Date.utc_today() end)
     }
@@ -208,6 +265,17 @@ defmodule FlowStone do
   defp dependencies_for(asset_name, %{edges: edges}) do
     deps = Map.get(edges, asset_name, [])
     Enum.flat_map(deps, &dependencies_for(&1, %{edges: edges})) ++ [asset_name]
+  end
+
+  defp existing_materialization?(asset, partition, store, use_repo) do
+    case FlowStone.MaterializationContext.latest(asset, partition,
+           store: store,
+           use_repo: use_repo
+         ) do
+      %FlowStone.Materialization{status: :success} -> true
+      %{status: :success} -> true
+      _ -> false
+    end
   end
 
   defp oban_running?,
