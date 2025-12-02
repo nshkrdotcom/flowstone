@@ -27,6 +27,13 @@ defmodule FlowStone.Registry do
     end
   end
 
+  def fetch!(name, opts \\ []) do
+    case fetch(name, opts) do
+      {:ok, asset} -> asset
+      {:error, :not_found} -> raise ArgumentError, "asset #{inspect(name)} not found"
+    end
+  end
+
   def list(opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
     Agent.get(server, &Map.values/1)
