@@ -1,5 +1,5 @@
 defmodule FlowStone.ResourcesTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   defmodule DummyResource do
     use FlowStone.Resource

@@ -8,14 +8,12 @@ config :flowstone,
     s3: FlowStone.IO.S3,
     parquet: FlowStone.IO.Parquet
   },
-  default_io_manager: :memory
-
-config :flowstone, FlowStone.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
-  database: "flowstone_dev",
-  pool_size: 10
+  default_io_manager: :memory,
+  start_repo: false,
+  start_pubsub: false,
+  start_resources: false,
+  start_materialization_store: false,
+  start_oban: false
 
 config :flowstone, Oban,
   repo: FlowStone.Repo,
@@ -26,3 +24,5 @@ config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000, cleanup_interval_ms: 60_000]}
 
 config :logger, level: :info
+
+import_config "#{config_env()}.exs"

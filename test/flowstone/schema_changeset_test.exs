@@ -1,5 +1,5 @@
 defmodule FlowStone.SchemaChangesetTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   test "materialization changeset" do
     attrs = %{asset_name: "a", run_id: Ecto.UUID.generate(), status: :pending}

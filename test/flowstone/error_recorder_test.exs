@@ -1,5 +1,5 @@
 defmodule FlowStone.ErrorRecorderTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
   import ExUnit.CaptureLog
 
   def handle_event(_event, _meas, metadata, pid) do

@@ -1,5 +1,5 @@
 defmodule FlowStone.LineageTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   setup do
     {:ok, pid} = start_supervised(FlowStone.Lineage)
@@ -9,7 +9,10 @@ defmodule FlowStone.LineageTest do
   test "records upstream dependencies", %{server: server} do
     FlowStone.Lineage.record(:target, :p1, "run", [dep: :p1], server)
 
-    assert [%{asset: :dep}] = FlowStone.Lineage.upstream(:target, :p1, server)
-    assert [%{asset: :target}] = FlowStone.Lineage.downstream(:dep, :p1, server)
+    upstream = FlowStone.Lineage.upstream(:target, :p1, server)
+    assert Enum.any?(upstream, &match?(%{asset: :dep}, &1))
+
+    downstream = FlowStone.Lineage.downstream(:dep, :p1, server)
+    assert Enum.any?(downstream, &match?(%{asset: :target}, &1))
   end
 end

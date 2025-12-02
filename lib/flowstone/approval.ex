@@ -9,6 +9,26 @@ defmodule FlowStone.Approval do
   @primary_key {:id, :binary_id, autogenerate: true}
   @statuses [:pending, :approved, :modified, :rejected, :escalated, :expired]
 
+  @type status :: :pending | :approved | :modified | :rejected | :escalated | :expired
+
+  @type t :: %__MODULE__{
+          id: Ecto.UUID.t() | nil,
+          materialization_id: Ecto.UUID.t() | nil,
+          checkpoint_name: String.t() | nil,
+          message: String.t() | nil,
+          context: map() | nil,
+          timeout_at: DateTime.t() | nil,
+          status: status(),
+          decision_by: String.t() | nil,
+          decision_at: DateTime.t() | nil,
+          reason: String.t() | nil,
+          modifications: map() | nil,
+          escalated_to: String.t() | nil,
+          escalation_count: non_neg_integer(),
+          inserted_at: DateTime.t() | nil,
+          updated_at: DateTime.t() | nil
+        }
+
   schema "flowstone_approvals" do
     field :materialization_id, :binary_id
     field :checkpoint_name, :string

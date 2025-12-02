@@ -1,5 +1,5 @@
 defmodule FlowStone.IOMemoryTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   setup do
     {:ok, _pid} = start_supervised(FlowStone.IO.Memory)

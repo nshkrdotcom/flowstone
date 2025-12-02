@@ -1,5 +1,5 @@
 defmodule FlowStone.ScheduleStoreTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   setup do
     {:ok, _} = start_supervised({FlowStone.ScheduleStore, name: :schedule_store})

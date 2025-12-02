@@ -94,7 +94,7 @@ defmodule FlowStone.MixProject do
   defp aliases do
     [
       setup: ["deps.get"],
-      test: ["test"],
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       quality: ["format --check-formatted", "credo --strict", "dialyzer"]
     ]
   end

@@ -1,5 +1,5 @@
 defmodule FlowStone.PubSubTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   test "broadcast delivers to subscribers" do
     {:ok, _} = start_supervised({FlowStone.PubSub, name: :ps_test, adapter: Phoenix.PubSub.PG2})

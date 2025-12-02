@@ -1,5 +1,5 @@
 defmodule FlowStone.IOManagersTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   test "postgres manager uses injected functions" do
     config = %{

@@ -1,9 +1,9 @@
 defmodule FlowStone.CheckpointTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   setup do
-    {:ok, pid} = start_supervised(FlowStone.Checkpoint)
-    %{server: pid}
+    {:ok, _pid} = start_supervised({FlowStone.Checkpoint, name: :checkpoint_test})
+    %{server: :checkpoint_test}
   end
 
   test "creates and lists pending approvals", %{server: server} do

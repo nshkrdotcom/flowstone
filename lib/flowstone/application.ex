@@ -4,12 +4,54 @@ defmodule FlowStone.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      # The repo and other runtime services can be added when configured.
-      # Keeping the default tree minimal avoids failures when no database
-      # is available (common in library/test environments).
-    ]
+    children =
+      []
+      |> maybe_add_repo()
+      |> maybe_add_pubsub()
+      |> maybe_add_resources()
+      |> maybe_add_oban()
+      |> maybe_add_materialization_store()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: FlowStone.Supervisor)
+  end
+
+  defp maybe_add_repo(children) do
+    if Application.get_env(:flowstone, :start_repo, false) do
+      children ++ [FlowStone.Repo]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_pubsub(children) do
+    if Application.get_env(:flowstone, :start_pubsub, false) do
+      children ++ [{FlowStone.PubSub, name: FlowStone.PubSub.Server}]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_resources(children) do
+    if Application.get_env(:flowstone, :start_resources, false) do
+      children ++ [FlowStone.Resources]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_materialization_store(children) do
+    if Application.get_env(:flowstone, :start_materialization_store, false) do
+      children ++ [FlowStone.MaterializationStore]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_oban(children) do
+    if Application.get_env(:flowstone, :start_oban, false) do
+      children ++ [{Oban, Application.fetch_env!(:flowstone, Oban)}]
+    else
+      children
+    end
   end
 end

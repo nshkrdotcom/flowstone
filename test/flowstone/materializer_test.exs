@@ -1,10 +1,16 @@
 defmodule FlowStone.MaterializerTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   alias FlowStone.{Asset, Context, Error, Materializer}
 
   setup do
-    context = %Context{asset: :demo, partition: :default, run_id: "run-1", resources: %{}}
+    context = %Context{
+      asset: :demo,
+      partition: :default,
+      run_id: Ecto.UUID.generate(),
+      resources: %{}
+    }
+
     %{context: context}
   end
 

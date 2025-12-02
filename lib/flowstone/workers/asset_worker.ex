@@ -3,7 +3,10 @@ defmodule FlowStone.Workers.AssetWorker do
   Oban worker that materializes a single asset partition.
   """
 
-  use Oban.Worker, queue: :assets, max_attempts: 3
+  use Oban.Worker,
+    queue: :assets,
+    max_attempts: 5,
+    unique: [period: 60, fields: [:args]]
 
   alias FlowStone.{Error, Executor, Registry}
 
@@ -14,7 +17,10 @@ defmodule FlowStone.Workers.AssetWorker do
     registry = Map.get(args, "registry", FlowStone.Registry)
     io_opts = Map.get(args, "io", [])
     resource_server = Map.get(args, "resource_server")
+    lineage_server = Map.get(args, "lineage_server")
+    materialization_store = Map.get(args, "materialization_store")
     run_id = Map.get(args, "run_id", Ecto.UUID.generate())
+    use_repo = Map.get(args, "use_repo", true)
 
     case check_dependencies(asset_name, partition, registry, io_opts) do
       :ok ->
@@ -23,12 +29,22 @@ defmodule FlowStone.Workers.AssetWorker do
                registry: registry,
                io: io_opts,
                resource_server: resource_server,
+               lineage_server: lineage_server,
+               materialization_store: materialization_store,
+               use_repo: use_repo,
                run_id: run_id
              ) do
-          {:ok, _} -> :ok
-          {:error, %Error{retryable: true}} = err -> err
-          {:error, %Error{retryable: false} = err} -> {:discard, err.message}
-          other -> other
+          {:ok, _} ->
+            :ok
+
+          {:error, %Error{retryable: true} = err} ->
+            err
+
+          {:error, %Error{retryable: false} = err} ->
+            {:discard, err.message}
+
+          other ->
+            other
         end
 
       {:snooze, seconds} ->

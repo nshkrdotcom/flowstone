@@ -1,5 +1,5 @@
 defmodule FlowStone.Workers.AssetWorkerTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   alias FlowStone.Workers.AssetWorker
 

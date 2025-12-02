@@ -1,5 +1,5 @@
 defmodule FlowStone.MaterializationTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use FlowStone.TestCase, isolation: :full_isolation
 
   test "materialization changeset validates required fields" do
     attrs = %{
