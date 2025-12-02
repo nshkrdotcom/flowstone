@@ -19,8 +19,8 @@ config :flowstone,
 config :flowstone, Oban,
   repo: FlowStone.Repo,
   testing: :inline,
-  queues: [assets: 10],
-  plugins: false
+  queues: [assets: 10, checkpoints: 2],
+  plugins: []
 
 config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000, cleanup_interval_ms: 60_000]}

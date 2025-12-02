@@ -24,4 +24,14 @@ defmodule FlowStone.CheckpointTest do
     assert {:ok, %{status: :rejected, reason: "bad"}} =
              FlowStone.Checkpoint.get(approval2.id, server)
   end
+
+  test "repo-backed approvals update status" do
+    {:ok, approval} = FlowStone.Approvals.request(:gate, %{message: "hi"})
+    assert approval.status == :pending
+
+    assert :ok = FlowStone.Approvals.approve(approval.id, by: "repo-user")
+
+    assert {:ok, %{status: :approved, decision_by: "repo-user"}} =
+             FlowStone.Approvals.get(approval.id)
+  end
 end

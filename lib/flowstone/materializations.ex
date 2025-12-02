@@ -66,6 +66,17 @@ defmodule FlowStone.Materializations do
     end
   end
 
+  def record_waiting_approval(asset, partition, run_id, opts \\ []) do
+    if use_repo?(opts) do
+      update_record(asset, partition, run_id, %{
+        status: :waiting_approval,
+        completed_at: DateTime.utc_now()
+      })
+    else
+      :ok
+    end
+  end
+
   defp update_record(asset, partition, run_id, changes) do
     partition_str = FlowStone.Partition.serialize(partition)
 

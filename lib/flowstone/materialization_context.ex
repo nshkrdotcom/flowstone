@@ -7,7 +7,7 @@ defmodule FlowStone.MaterializationContext do
   alias FlowStone.{Materialization, MaterializationStore, Repo}
 
   def get(asset, partition, run_id, opts \\ []) do
-    if repo_running?() do
+    if use_repo?(opts) do
       Repo.get_by(Materialization,
         asset_name: Atom.to_string(asset),
         partition: FlowStone.Partition.serialize(partition),
@@ -20,7 +20,7 @@ defmodule FlowStone.MaterializationContext do
   end
 
   def list(opts \\ []) do
-    if repo_running?() do
+    if use_repo?(opts) do
       Repo.all(from m in Materialization, order_by: [desc: m.inserted_at])
     else
       store = Keyword.get(opts, :store, MaterializationStore)
@@ -28,5 +28,28 @@ defmodule FlowStone.MaterializationContext do
     end
   end
 
+  def latest(asset, partition, opts \\ []) do
+    if use_repo?(opts) do
+      Repo.one(
+        from m in Materialization,
+          where:
+            m.asset_name == ^Atom.to_string(asset) and
+              m.partition == ^FlowStone.Partition.serialize(partition),
+          order_by: [desc: m.inserted_at],
+          limit: 1
+      )
+    else
+      store = Keyword.get(opts, :store, MaterializationStore)
+
+      store
+      |> MaterializationStore.list()
+      |> Enum.filter(&(&1.asset == asset and &1.partition == partition))
+      |> List.last()
+    end
+  end
+
   defp repo_running?, do: Process.whereis(Repo) != nil
+
+  defp use_repo?(opts),
+    do: Keyword.get(opts, :use_repo, true) and repo_running?()
 end

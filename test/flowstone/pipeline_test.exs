@@ -36,6 +36,22 @@ defmodule FlowStone.PipelineTest do
     assert DAG.topological_names(graph) == [:raw_events, :clean_events]
   end
 
+  defmodule PartitionPipeline do
+    use FlowStone.Pipeline
+
+    asset :daily do
+      partitioned_by(:date)
+      partition(fn _opts -> [~D[2024-01-01], ~D[2024-01-02]] end)
+      execute fn _, _ -> {:ok, :p} end
+    end
+  end
+
+  test "captures partition metadata and fn" do
+    [asset] = PartitionPipeline.__flowstone_assets__()
+    assert asset.partitioned_by == :date
+    assert is_function(asset.partition_fn, 1)
+  end
+
   defmodule CyclicPipeline do
     use FlowStone.Pipeline
 

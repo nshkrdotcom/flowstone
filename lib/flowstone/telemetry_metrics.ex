@@ -1,23 +1,23 @@
 defmodule FlowStone.TelemetryMetrics do
   @moduledoc """
-  Telemetry metrics definitions.
+  Telemetry metrics definitions for FlowStone.
   """
 
   import Telemetry.Metrics
 
+  @doc """
+  Return a list of metrics for materialization and IO events.
+  """
   def metrics do
     [
-      counter("flowstone.error.count", tags: [:type, :asset, :retryable]),
-      distribution("flowstone.io.load.duration",
-        unit: {:native, :millisecond},
-        tags: [:asset, :io_manager]
-      ),
-      distribution("flowstone.io.store.duration",
-        unit: {:native, :millisecond},
-        tags: [:asset, :io_manager]
-      ),
-      counter("flowstone.io.load.count", tags: [:asset, :io_manager]),
-      counter("flowstone.io.store.count", tags: [:asset, :io_manager])
+      summary("flowstone.materialization.duration", unit: {:native, :millisecond}),
+      counter("flowstone.materialization.count"),
+      counter("flowstone.materialization.exception"),
+      summary("flowstone.io.load.duration", unit: {:native, :millisecond}),
+      summary("flowstone.io.store.duration", unit: {:native, :millisecond}),
+      counter("flowstone.checkpoint.requested"),
+      counter("flowstone.checkpoint.approved"),
+      counter("flowstone.checkpoint.rejected")
     ]
   end
 end

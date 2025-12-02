@@ -24,22 +24,33 @@ defmodule FlowStone.Partition do
   def deserialize(%NaiveDateTime{} = ndt), do: ndt
 
   def deserialize(value) when is_binary(value) do
-    with {:ok, dt, _} <- DateTime.from_iso8601(value) do
-      dt
-    else
-      _ ->
-        with {:ok, ndt} <- NaiveDateTime.from_iso8601(value) do
-          ndt
-        else
-          _ ->
-            with {:ok, date} <- Date.from_iso8601(value) do
-              date
-            else
-              _ -> value
-            end
-        end
+    cond do
+      String.contains?(value, "|") ->
+        value
+        |> String.split("|")
+        |> Enum.map(&deserialize/1)
+        |> List.to_tuple()
+
+      match_datetime?(value) ->
+        {:ok, dt, _} = DateTime.from_iso8601(value)
+        dt
+
+      match_naive?(value) ->
+        {:ok, ndt} = NaiveDateTime.from_iso8601(value)
+        ndt
+
+      match_date?(value) ->
+        {:ok, date} = Date.from_iso8601(value)
+        date
+
+      true ->
+        value
     end
   end
 
   def deserialize(other), do: other
+
+  defp match_datetime?(value), do: match?({:ok, _dt, _offset}, DateTime.from_iso8601(value))
+  defp match_naive?(value), do: match?({:ok, _}, NaiveDateTime.from_iso8601(value))
+  defp match_date?(value), do: match?({:ok, _}, Date.from_iso8601(value))
 end

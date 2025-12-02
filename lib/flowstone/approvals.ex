@@ -17,6 +17,10 @@ defmodule FlowStone.Approvals do
       %Approval{}
       |> Approval.changeset(params)
       |> Repo.insert()
+      |> tap(fn
+        {:ok, approval} -> notify(:requested, approval, opts)
+        _ -> :ok
+      end)
     else
       server = Keyword.get(opts, :server, Checkpoint)
       Checkpoint.request(checkpoint_name, attrs, server)
@@ -83,8 +87,12 @@ defmodule FlowStone.Approvals do
         |> Approval.changeset(attrs)
         |> Repo.update()
         |> case do
-          {:ok, _} -> :ok
-          {:error, reason} -> {:error, reason}
+          {:ok, updated} ->
+            notify(status, updated, opts)
+            :ok
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -93,4 +101,14 @@ defmodule FlowStone.Approvals do
 
   defp repo_running?,
     do: Application.get_env(:flowstone, :start_repo, false) and Process.whereis(Repo) != nil
+
+  defp notify(event, approval, opts) do
+    notifier = Keyword.get(opts, :notifier, FlowStone.Checkpoint.Notifier)
+
+    if function_exported?(notifier, :notify, 2) do
+      notifier.notify(event, %{approval: approval})
+    else
+      :ok
+    end
+  end
 end

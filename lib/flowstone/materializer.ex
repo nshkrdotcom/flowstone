@@ -15,6 +15,23 @@ defmodule FlowStone.Materializer do
         {:ok, value} ->
           {:ok, value}
 
+        {:wait_for_approval, approval_attrs} ->
+          FlowStone.Approvals.request(asset.name, approval_attrs, use_repo: true)
+
+          FlowStone.Materializations.record_waiting_approval(
+            asset.name,
+            context.partition,
+            context.run_id
+          )
+
+          {:error,
+           FlowStone.Error.execution_error(
+             asset.name,
+             context.partition,
+             wrap(:waiting_approval),
+             []
+           )}
+
         {:error, %Error{} = err} ->
           ErrorRecorder.record(err, %{
             asset: asset.name,

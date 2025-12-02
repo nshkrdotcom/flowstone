@@ -51,4 +51,9 @@ defmodule FlowStone.Workers.AssetWorkerTest do
     assert :ok = AssetWorker.perform(job)
     assert {:ok, {:done, :value}} = FlowStone.IO.load(:target, :p1, io_opts)
   end
+
+  test "uses exponential backoff" do
+    assert AssetWorker.backoff(%Oban.Job{attempt: 1}) >= 5
+    assert AssetWorker.backoff(%Oban.Job{attempt: 5}) <= 300
+  end
 end

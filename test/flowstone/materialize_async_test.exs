@@ -26,6 +26,7 @@ defmodule FlowStone.MaterializeAsyncTest do
       )
 
     assert result == :ok or match?({:ok, %Oban.Job{}}, result)
+    FlowStone.ObanHelpers.drain()
 
     assert {:ok, :a} = FlowStone.IO.load(:a, :p, io_opts)
   end

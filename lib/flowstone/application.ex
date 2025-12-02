@@ -9,8 +9,10 @@ defmodule FlowStone.Application do
       |> maybe_add_repo()
       |> maybe_add_pubsub()
       |> maybe_add_resources()
-      |> maybe_add_oban()
       |> maybe_add_materialization_store()
+      |> maybe_add_oban()
+      |> maybe_add_metrics()
+      |> maybe_add_scheduler()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: FlowStone.Supervisor)
   end
@@ -50,6 +52,27 @@ defmodule FlowStone.Application do
   defp maybe_add_oban(children) do
     if Application.get_env(:flowstone, :start_oban, false) do
       children ++ [{Oban, Application.fetch_env!(:flowstone, Oban)}]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_metrics(children) do
+    if Code.ensure_loaded?(TelemetryMetricsPrometheus.Core) do
+      metrics = FlowStone.TelemetryMetrics.metrics()
+
+      exporter =
+        {TelemetryMetricsPrometheus.Core, name: FlowStone.Prometheus, metrics: metrics}
+
+      children ++ [exporter]
+    else
+      children
+    end
+  end
+
+  defp maybe_add_scheduler(children) do
+    if Application.get_env(:flowstone, :start_oban, false) do
+      children ++ [FlowStone.Schedules.Scheduler]
     else
       children
     end

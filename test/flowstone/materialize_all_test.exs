@@ -22,13 +22,14 @@ defmodule FlowStone.MaterializeAllTest do
   end
 
   test "materialize_all executes dependencies first", %{io_opts: io_opts} do
-    assert :ok =
-             FlowStone.materialize_all(:clean,
-               partition: :p1,
-               registry: :mat_registry,
-               io: io_opts,
-               resource_server: nil
-             )
+    FlowStone.materialize_all(:clean,
+      partition: :p1,
+      registry: :mat_registry,
+      io: io_opts,
+      resource_server: nil
+    )
+
+    FlowStone.ObanHelpers.drain()
 
     assert {:ok, :raw} = FlowStone.IO.load(:raw, :p1, io_opts)
     assert {:ok, {:clean, :raw}} = FlowStone.IO.load(:clean, :p1, io_opts)
@@ -42,6 +43,8 @@ defmodule FlowStone.MaterializeAllTest do
         io: io_opts,
         resource_server: nil
       )
+
+    FlowStone.ObanHelpers.drain()
 
     assert result.partitions == [:p1, :p2]
     assert {:ok, :raw} = FlowStone.IO.load(:raw, :p1, io_opts)
