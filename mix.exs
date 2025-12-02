@@ -53,7 +53,6 @@ defmodule FlowStone.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:postgrex, "~> 0.17"},
       {:oban, "~> 2.18"},
-      {:runic, "~> 0.1"},
       {:jason, "~> 1.4"},
 
       # Phoenix / LiveView (optional for UI)
@@ -94,10 +93,8 @@ defmodule FlowStone.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
-      "ecto.setup": ["ecto.create", "ecto.migrate"],
-      "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      setup: ["deps.get"],
+      test: ["test"],
       quality: ["format --check-formatted", "credo --strict", "dialyzer"]
     ]
   end
