@@ -48,7 +48,7 @@
            C138 136 120 140 104 126 C88 112 84 88 98 70
            C122 38 172 34 210 54 C250 76 272 124 246 166
            C224 202 186 214 156 202 C134 194 104 200 90 218
-           C88 232 96 256 114 294 C152 306 204 290 232 258"
+           C88 252 96 271 114 280 C152 306 204 290 232 258"
         fill="none" stroke="url(#pathGradient)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"
         filter="url(#innerGlow)" />
 
