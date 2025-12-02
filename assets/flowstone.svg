@@ -1,4 +1,4 @@
-<svg width="320" height="360" viewBox="0 0 320 360" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FlowStone logo">
+<svg width="320" height="336" viewBox="0 0 320 336" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FlowStone logo">
   <defs>
     <linearGradient id="hexGradient" x1="60" y1="30" x2="260" y2="330" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#1C2A52"/>
@@ -42,33 +42,28 @@
     <line x1="220" y1="62" x2="100" y2="274"/>
   </g>
 
-  <!-- Flow path -->
-  <path d="M96 198 C116 170 148 166 168 186 C188 206 204 212 224 196
-           C242 182 250 152 232 134 C208 110 170 120 152 146
-           C138 166 120 170 104 156 C88 142 84 118 98 100
-           C122 68 172 64 210 84 C250 106 272 154 246 196
-           C224 232 186 244 156 232 C134 224 104 230 90 248
-           C70 276 78 312 114 324 C152 336 204 320 232 288"
+  <!-- Flow path (curves around center stone) -->
+  <path d="M80 120 C100 90 140 80 180 90
+           C220 100 250 130 250 168
+           C250 206 220 236 180 246
+           C140 256 100 246 80 216
+           C60 186 60 150 80 120"
         fill="none" stroke="url(#pathGradient)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"
         filter="url(#innerGlow)" />
 
   <!-- Nodes -->
   <g fill="#8AF3FF" stroke="#0B1328" stroke-width="2">
-    <circle cx="98" cy="100" r="7"/>
-    <circle cx="152" cy="146" r="7.5"/>
-    <circle cx="224" cy="196" r="7.5"/>
-    <circle cx="90" cy="248" r="7"/>
-    <circle cx="156" cy="232" r="7"/>
-    <circle cx="232" cy="288" r="8"/>
+    <circle cx="80" cy="120" r="7"/>
+    <circle cx="180" cy="90" r="7"/>
+    <circle cx="250" cy="168" r="7.5"/>
+    <circle cx="180" cy="246" r="7"/>
+    <circle cx="80" cy="216" r="7"/>
   </g>
 
-  <!-- Center stone -->
-  <path d="M160 164 L188 182 L188 214 L160 232 L132 214 L132 182 Z"
+  <!-- Center stone (centered at 160,168) -->
+  <path d="M160 134 L188 152 L188 184 L160 202 L132 184 L132 152 Z"
         fill="#11172F" stroke="#6AC8FF" stroke-width="3" />
-  <path d="M160 170 L182 184 L182 210 L160 224 L138 210 L138 184 Z"
+  <path d="M160 140 L182 154 L182 180 L160 194 L138 180 L138 154 Z"
         fill="url(#pathGradient)" stroke="#8AF3FF" stroke-width="2" />
 
-  <!-- Title mark -->
-  <text x="160" y="348" text-anchor="middle" font-family="Inter, 'Segoe UI', system-ui"
-        font-size="18" fill="#8AF3FF" letter-spacing="0.6">FlowStone</text>
 </svg>
