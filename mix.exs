@@ -144,11 +144,11 @@ defmodule FlowStone.MixProject do
       source_ref: "v#{@version}",
       source_url: @source_url,
       extras: [
-        "README.md",
+        {"README.md", [filename: "readme"]},
         "CHANGELOG.md",
         "LICENSE",
         "docs/design/OVERVIEW.md",
-        "docs/adr/README.md",
+        {"docs/adr/README.md", [filename: "adr-overview"]},
         "docs/adr/0001-asset-first-orchestration.md",
         "docs/adr/0002-dag-engine-persistence.md",
         "docs/adr/0003-partitioning-isolation.md",

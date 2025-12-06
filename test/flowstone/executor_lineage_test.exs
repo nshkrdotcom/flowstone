@@ -27,17 +27,21 @@ defmodule FlowStone.ExecutorLineageTest do
     :ok = FlowStone.IO.store(:dep, :v, :p, io_opts)
     run_id = Ecto.UUID.generate()
 
-    assert :ok =
-             FlowStone.materialize(:target,
-               partition: :p,
-               registry: :lineage_registry,
-               io: io_opts,
-               materialization_store: :mat_store,
-               lineage_server: :lineage_server,
-               resource_server: nil,
-               use_repo: false,
-               run_id: run_id
-             )
+    result =
+      FlowStone.materialize(:target,
+        partition: :p,
+        registry: :lineage_registry,
+        io: io_opts,
+        materialization_store: :mat_store,
+        lineage_server: :lineage_server,
+        resource_server: nil,
+        use_repo: false,
+        run_id: run_id
+      )
+
+    assert result == :ok or match?({:ok, %Oban.Job{}}, result)
+
+    FlowStone.ObanHelpers.drain()
 
     assert [%{asset: :dep, partition: "p"}] =
              FlowStone.Lineage.upstream(:target, :p, :lineage_server)

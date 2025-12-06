@@ -33,13 +33,17 @@ defmodule FlowStone.MaterializationTelemetryTest do
       self
     )
 
-    assert :ok =
-             FlowStone.materialize(:a,
-               partition: :p,
-               registry: :tele_registry,
-               io: io_opts,
-               resource_server: nil
-             )
+    result =
+      FlowStone.materialize(:a,
+        partition: :p,
+        registry: :tele_registry,
+        io: io_opts,
+        resource_server: nil
+      )
+
+    assert result == :ok or match?({:ok, %Oban.Job{}}, result)
+
+    FlowStone.ObanHelpers.drain()
 
     assert_receive {:event, [:flowstone, :materialization, :start], _, %{asset: :a}}
     assert_receive {:event, [:flowstone, :materialization, :stop], %{duration: _}, %{asset: :a}}

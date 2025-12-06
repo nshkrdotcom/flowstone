@@ -54,7 +54,13 @@ defmodule FlowStone.Workers.AssetWorker do
 
   @impl Oban.Worker
   def backoff(%Oban.Job{attempt: attempt}) do
-    trunc(:math.pow(2, attempt)) |> max(5) |> min(300)
+    attempt
+    |> Kernel.-(1)
+    |> max(0)
+    |> then(&:math.pow(3, &1))
+    |> Kernel.*(30)
+    |> round()
+    |> min(300)
   end
 
   defp check_dependencies(asset_name, partition, registry, io_opts) do
