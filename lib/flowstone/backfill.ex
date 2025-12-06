@@ -15,14 +15,14 @@ defmodule FlowStone.Backfill do
     partition_fn = Keyword.get(opts, :partition_fn)
 
     cond do
-      is_function(partition_fn, 1) ->
-        apply_partition_fn(partition_fn, opts)
-
       Keyword.has_key?(opts, :partitions) ->
         Keyword.fetch!(opts, :partitions)
 
       opts[:start_partition] && opts[:end_partition] ->
         build_range(opts[:start_partition], opts[:end_partition])
+
+      is_function(partition_fn, 0) or is_function(partition_fn, 1) ->
+        apply_partition_fn(partition_fn, opts)
 
       true ->
         raise ArgumentError, "backfill requires :partitions or start/end partitions"
@@ -37,7 +37,13 @@ defmodule FlowStone.Backfill do
     raise ArgumentError, "unsupported partition range #{inspect(start_val)}..#{inspect(end_val)}"
   end
 
-  defp apply_partition_fn(fun, opts) when is_function(fun, 1) do
-    fun.(opts) |> Enum.to_list()
+  defp apply_partition_fn(fun, opts) when is_function(fun) do
+    result =
+      case :erlang.fun_info(fun, :arity) do
+        {:arity, 0} -> fun.()
+        _ -> fun.(opts)
+      end
+
+    result |> Enum.to_list()
   end
 end

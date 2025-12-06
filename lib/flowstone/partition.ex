@@ -19,6 +19,10 @@ defmodule FlowStone.Partition do
   Best-effort deserialization of a partition string back to a structured type.
   """
   def deserialize(nil), do: nil
+
+  def deserialize(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> Enum.map(&deserialize/1) |> List.to_tuple()
+
   def deserialize(%Date{} = date), do: date
   def deserialize(%DateTime{} = dt), do: dt
   def deserialize(%NaiveDateTime{} = ndt), do: ndt

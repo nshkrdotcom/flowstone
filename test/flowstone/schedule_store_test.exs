@@ -47,6 +47,8 @@ defmodule FlowStone.ScheduleStoreTest do
     schedule = hd(FlowStone.list_schedules(store: :schedule_store))
     :ok = FlowStone.Schedules.Scheduler.run_now(schedule, pid)
 
+    FlowStone.ObanHelpers.drain()
+
     assert {:ok, :foo} = FlowStone.IO.load(:foo, :scheduled, config: %{agent: :sched_memory})
   end
 end
