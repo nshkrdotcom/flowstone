@@ -5,6 +5,7 @@ defmodule FlowStone.Schedules.Scheduler do
 
   use GenServer
   require Logger
+  alias Crontab.CronExpression.Parser, as: CronParser
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -66,7 +67,7 @@ defmodule FlowStone.Schedules.Scheduler do
   end
 
   defp next_run(cron, timezone) do
-    with {:ok, dt} <- Crontab.CronExpression.Parser.parse(cron),
+    with {:ok, dt} <- CronParser.parse(cron),
          {:ok, now} <- now_in_timezone(timezone),
          {:ok, next} <- Crontab.Scheduler.get_next_run_date(dt, now) do
       {:ok, next}

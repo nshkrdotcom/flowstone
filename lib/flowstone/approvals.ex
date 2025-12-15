@@ -5,6 +5,7 @@ defmodule FlowStone.Approvals do
 
   import Ecto.Query
   alias FlowStone.{Approval, Checkpoint, Repo}
+  alias FlowStone.Workers.CheckpointTimeout
 
   @default_timeout_seconds 3_600
 
@@ -138,7 +139,7 @@ defmodule FlowStone.Approvals do
   defp schedule_timeout(%Approval{timeout_at: timeout_at} = approval) do
     if oban_running?() do
       %{"approval_id" => approval.id}
-      |> FlowStone.Workers.CheckpointTimeout.new(scheduled_at: timeout_at)
+      |> CheckpointTimeout.new(scheduled_at: timeout_at)
       |> Oban.insert()
     else
       :ok

@@ -1,5 +1,6 @@
 defmodule FlowStone.MaterializerTest do
   use FlowStone.TestCase, isolation: :full_isolation
+  import ExUnit.CaptureLog
 
   alias FlowStone.{Asset, Context, Error, Materializer}
 
@@ -33,8 +34,13 @@ defmodule FlowStone.MaterializerTest do
       execute_fn: fn _ctx, _deps -> :value end
     }
 
-    assert {:error, %Error{type: :execution_error, retryable: false}} =
-             Materializer.execute(asset, context, %{})
+    {result, log} =
+      with_log(fn ->
+        Materializer.execute(asset, context, %{})
+      end)
+
+    assert {:error, %Error{type: :execution_error, retryable: false}} = result
+    assert log =~ "Unexpected return"
   end
 
   test "handles wait_for_approval tuple" do
@@ -68,9 +74,13 @@ defmodule FlowStone.MaterializerTest do
       execute_fn: fn _, _ -> raise "boom" end
     }
 
-    assert {:error, %Error{type: :execution_error, message: msg}} =
-             Materializer.execute(asset, context, %{})
+    {result, log} =
+      with_log(fn ->
+        Materializer.execute(asset, context, %{})
+      end)
 
+    assert {:error, %Error{type: :execution_error, message: msg}} = result
     assert msg =~ "boom"
+    assert log =~ "Asset execution failed"
   end
 end

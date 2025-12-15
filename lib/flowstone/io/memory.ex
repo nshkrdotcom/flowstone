@@ -1,10 +1,14 @@
 defmodule FlowStone.IO.Memory do
   @moduledoc """
   In-memory I/O manager for tests and development.
+
+  Keys are normalized to ensure consistent lookups regardless of partition format
+  (atoms, strings, dates all serialize to the same canonical form).
   """
 
   use Agent
   @behaviour FlowStone.IO.Manager
+  alias FlowStone.Partition
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -14,8 +18,9 @@ defmodule FlowStone.IO.Memory do
   @impl true
   def load(asset, partition, config) do
     agent = resolve_agent(config)
+    key = normalize_key(asset, partition)
 
-    case Agent.get(agent, &Map.get(&1, {asset, partition})) do
+    case Agent.get(agent, &Map.get(&1, key)) do
       nil -> {:error, :not_found}
       data -> {:ok, data}
     end
@@ -23,13 +28,17 @@ defmodule FlowStone.IO.Memory do
 
   @impl true
   def store(asset, data, partition, config) do
-    config |> resolve_agent() |> Agent.update(&Map.put(&1, {asset, partition}, data))
+    agent = resolve_agent(config)
+    key = normalize_key(asset, partition)
+    Agent.update(agent, &Map.put(&1, key, data))
     :ok
   end
 
   @impl true
   def delete(asset, partition, config) do
-    config |> resolve_agent() |> Agent.update(&Map.delete(&1, {asset, partition}))
+    agent = resolve_agent(config)
+    key = normalize_key(asset, partition)
+    Agent.update(agent, &Map.delete(&1, key))
     :ok
   end
 
@@ -47,7 +56,16 @@ defmodule FlowStone.IO.Memory do
 
   @impl true
   def exists?(asset, partition, config) do
-    config |> resolve_agent() |> Agent.get(&Map.has_key?(&1, {asset, partition}))
+    agent = resolve_agent(config)
+    key = normalize_key(asset, partition)
+    Agent.get(agent, &Map.has_key?(&1, key))
+  end
+
+  # Normalize keys to ensure consistent lookups regardless of partition format
+  defp normalize_key(asset, partition) do
+    asset_str = to_string(asset)
+    partition_str = Partition.serialize(partition)
+    {asset_str, partition_str}
   end
 
   defp resolve_agent(config) do

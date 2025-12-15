@@ -3,8 +3,8 @@ defmodule FlowStone do
   Entry point for FlowStone APIs.
   """
 
-  alias FlowStone.Registry
-  alias FlowStone.DAG
+  alias FlowStone.{DAG, Partition, Registry, RunConfig}
+  alias FlowStone.Workers.AssetWorker
 
   @doc """
   Return assets declared in a pipeline module.
@@ -32,15 +32,24 @@ defmodule FlowStone do
   end
 
   @doc """
-  Materialize a single asset immediately (synchronously).
+  Materialize a single asset.
+
+  When Oban is running, this enqueues a job for async execution.
+  Otherwise, executes synchronously.
+
+  Returns:
+    - `{:ok, %Oban.Job{}}` when job is enqueued
+    - `:ok` when executed synchronously and successful
+    - `{:error, reason}` on failure
   """
   def materialize(asset, opts) do
-    args = build_args(asset, opts)
+    {args, run_config} = build_args(asset, opts)
 
     if oban_running?() do
+      store_run_config(args["run_id"], run_config)
       enqueue_asset(args)
     else
-      perform_asset(args)
+      perform_asset(args, run_config)
     end
   end
 
@@ -48,11 +57,15 @@ defmodule FlowStone do
   Enqueue materialization via Oban if running; otherwise performs synchronously.
   """
   def materialize_async(asset, opts) do
-    args = build_args(asset, opts)
+    {args, run_config} = build_args(asset, opts)
 
     case oban_running?() do
-      true -> enqueue_asset(args)
-      false -> perform_asset(args)
+      true ->
+        store_run_config(args["run_id"], run_config)
+        enqueue_asset(args)
+
+      false ->
+        perform_asset(args, run_config)
     end
   end
 
@@ -62,7 +75,9 @@ defmodule FlowStone do
   def materialize_all(asset, opts) do
     registry = Keyword.get(opts, :registry, Registry)
     io_opts = Keyword.get(opts, :io, [])
-    resource_server = Keyword.get(opts, :resource_server, nil)
+    resource_server = Keyword.get(opts, :resource_server)
+    lineage_server = Keyword.get(opts, :lineage_server)
+    materialization_store = Keyword.get(opts, :materialization_store)
     partition = Keyword.fetch!(opts, :partition)
     use_repo = Keyword.get(opts, :use_repo, true)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
@@ -72,43 +87,43 @@ defmodule FlowStone do
 
     subset = dependencies_for(asset, graph)
 
+    shared_opts = [
+      partition: partition,
+      registry: registry,
+      io: io_opts,
+      resource_server: resource_server,
+      lineage_server: lineage_server,
+      materialization_store: materialization_store,
+      use_repo: use_repo,
+      run_id: run_id
+    ]
+
     if oban_running?() do
       subset
-      |> Enum.map(fn name ->
-        materialize_async(name,
-          partition: partition,
-          registry: registry,
-          io: io_opts,
-          resource_server: resource_server,
-          use_repo: use_repo,
-          run_id: run_id
-        )
-      end)
+      |> Enum.map(fn name -> materialize_async(name, shared_opts) end)
       |> List.last()
     else
-      Enum.map(subset, fn name ->
-        materialize(name,
-          partition: partition,
-          registry: registry,
-          io: io_opts,
-          resource_server: resource_server,
-          use_repo: use_repo,
-          run_id: run_id
-        )
-      end)
+      subset
+      |> Enum.map(fn name -> materialize(name, shared_opts) end)
       |> List.last()
     end
   end
 
   @doc """
-  Backfill an asset across multiple partitions sequentially.
+  Backfill an asset across multiple partitions.
+
+  Options:
+    - `:partitions` - list of partitions to backfill
+    - `:force` - re-run even if already materialized (default: false)
+    - `:max_parallel` - max concurrent materializations (default: 1)
+    - `:timeout` - timeout for parallel execution (default: :infinity)
   """
   def backfill(asset, opts) do
     registry = Keyword.get(opts, :registry, Registry)
     io_opts = Keyword.get(opts, :io, [])
-    resource_server = Keyword.get(opts, :resource_server, nil)
-    lineage_server = Keyword.get(opts, :lineage_server, nil)
-    materialization_store = Keyword.get(opts, :materialization_store, nil)
+    resource_server = Keyword.get(opts, :resource_server)
+    lineage_server = Keyword.get(opts, :lineage_server)
+    materialization_store = Keyword.get(opts, :materialization_store)
     use_repo = Keyword.get(opts, :use_repo, true)
     force? = Keyword.get(opts, :force, false)
     max_parallel = Keyword.get(opts, :max_parallel, 1)
@@ -133,29 +148,23 @@ defmodule FlowStone do
 
     oban_running = oban_running?()
 
+    shared_opts = [
+      registry: registry,
+      io: io_opts,
+      resource_server: resource_server,
+      lineage_server: lineage_server,
+      materialization_store: materialization_store,
+      use_repo: use_repo,
+      run_id: run_id
+    ]
+
     runner = fn partition ->
       target_fun = if oban_running, do: &materialize_async/2, else: &materialize/2
-
-      target_fun.(asset,
-        partition: partition,
-        registry: registry,
-        io: io_opts,
-        resource_server: resource_server,
-        use_repo: use_repo,
-        lineage_server: lineage_server,
-        materialization_store: materialization_store,
-        run_id: run_id
-      )
+      target_fun.(asset, Keyword.put(shared_opts, :partition, partition))
     end
 
     results =
-      if oban_running do
-        partitions_to_run
-        |> Task.async_stream(runner, max_concurrency: max_parallel, timeout: timeout)
-        |> Enum.map(fn {:ok, res} -> res end)
-      else
-        Enum.map(partitions_to_run, runner)
-      end
+      run_backfill_partitions(partitions_to_run, runner, oban_running, max_parallel, timeout)
 
     skipped = partitions -- partitions_to_run
 
@@ -234,34 +243,108 @@ defmodule FlowStone do
   defp oban_running?,
     do: Process.whereis(Oban.Registry) != nil and Process.whereis(Oban.Config) != nil
 
+  # Run backfill partitions with appropriate parallelism strategy
+  defp run_backfill_partitions(partitions, runner, true = _oban_running, _max_parallel, _timeout) do
+    # When Oban is running, enqueue jobs (enqueue is fast, no need for Task.async_stream)
+    Enum.map(partitions, runner)
+  end
+
+  defp run_backfill_partitions(partitions, runner, false, max_parallel, timeout)
+       when max_parallel > 1 do
+    # When running synchronously with parallelism, use Task.async_stream
+    partitions
+    |> Task.async_stream(runner, max_concurrency: max_parallel, timeout: timeout)
+    |> Enum.map(fn {:ok, res} -> res end)
+  end
+
+  defp run_backfill_partitions(partitions, runner, false, _max_parallel, _timeout) do
+    # When running synchronously without parallelism
+    Enum.map(partitions, runner)
+  end
+
+  # Build JSON-safe args for Oban jobs and a separate run_config for runtime values.
+  #
+  # Oban persists job args as JSON, so we can only include:
+  # - strings, numbers, booleans, lists, maps
+  #
+  # Runtime values (servers, functions, keywords) are stored in RunConfig
+  # and looked up by run_id when the job executes.
   defp build_args(asset, opts) do
     partition = Keyword.fetch!(opts, :partition)
-    registry = Keyword.get(opts, :registry, Registry)
-    io_opts = Keyword.get(opts, :io, [])
-    use_repo = Keyword.get(opts, :use_repo, true)
-    resource_server = Keyword.get(opts, :resource_server, nil)
-    lineage_server = Keyword.get(opts, :lineage_server, nil)
-    materialization_store = Keyword.get(opts, :materialization_store, nil)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
+    use_repo = Keyword.get(opts, :use_repo, true)
+    io_opts = Keyword.get(opts, :io, [])
 
-    %{
-      "asset_name" => Atom.to_string(asset),
-      "partition" => partition,
-      "registry" => registry,
-      "io" => io_opts,
-      "resource_server" => resource_server,
-      "lineage_server" => lineage_server,
-      "materialization_store" => materialization_store,
+    # JSON-safe args for Oban
+    args = %{
+      "asset_name" => to_string(asset),
+      "partition" => Partition.serialize(partition),
       "run_id" => run_id,
       "use_repo" => use_repo
     }
+
+    # Runtime config stored separately (not JSON-safe)
+    # For synchronous execution, we keep the original io_opts
+    # For async execution, the io_config is converted to a JSON-safe format
+    run_config = [
+      registry: Keyword.get(opts, :registry, Registry),
+      resource_server: Keyword.get(opts, :resource_server),
+      lineage_server: Keyword.get(opts, :lineage_server),
+      materialization_store: Keyword.get(opts, :materialization_store),
+      io_opts: io_opts,
+      io_config: build_io_config(io_opts)
+    ]
+
+    {args, run_config}
+  end
+
+  # Convert IO options to a serializable config map
+  defp build_io_config(io_opts) when is_list(io_opts) do
+    config = Keyword.get(io_opts, :config, %{})
+
+    # Extract only JSON-safe values from the config
+    json_safe_config =
+      config
+      |> Enum.filter(fn {_k, v} -> json_safe?(v) end)
+      |> Map.new()
+
+    %{
+      "manager" => io_manager_name(Keyword.get(io_opts, :manager)),
+      "config" => json_safe_config
+    }
+  end
+
+  defp build_io_config(_), do: %{}
+
+  defp io_manager_name(nil), do: nil
+  defp io_manager_name(mod) when is_atom(mod), do: to_string(mod)
+  defp io_manager_name(other), do: to_string(other)
+
+  defp json_safe?(v) when is_binary(v), do: true
+  defp json_safe?(v) when is_number(v), do: true
+  defp json_safe?(v) when is_boolean(v), do: true
+  defp json_safe?(v) when is_nil(v), do: true
+  defp json_safe?(v) when is_atom(v), do: true
+  defp json_safe?(v) when is_list(v), do: Enum.all?(v, &json_safe?/1)
+
+  defp json_safe?(v) when is_map(v),
+    do: Enum.all?(v, fn {k, val} -> json_safe?(k) and json_safe?(val) end)
+
+  defp json_safe?(_), do: false
+
+  defp store_run_config(run_id, config) do
+    if Process.whereis(RunConfig) do
+      RunConfig.put(run_id, config)
+    end
+
+    :ok
   end
 
   defp enqueue_asset(args) do
-    FlowStone.Workers.AssetWorker.new(args) |> Oban.insert()
+    AssetWorker.new(args) |> Oban.insert()
   end
 
-  defp perform_asset(args) do
-    FlowStone.Workers.AssetWorker.perform(%Oban.Job{args: args})
+  defp perform_asset(args, run_config) do
+    AssetWorker.perform(%Oban.Job{args: args}, run_config)
   end
 end

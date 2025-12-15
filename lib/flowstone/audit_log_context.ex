@@ -20,18 +20,16 @@ defmodule FlowStone.AuditLogContext do
       inserted_at: DateTime.utc_now()
     }
 
-    cond do
-      use_repo?(opts) ->
-        %AuditLog{}
-        |> AuditLog.changeset(entry)
-        |> Repo.insert()
-        |> case do
-          {:ok, _} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
-
-      true ->
-        :ok
+    if use_repo?(opts) do
+      %AuditLog{}
+      |> AuditLog.changeset(entry)
+      |> Repo.insert()
+      |> case do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      :ok
     end
   end
 
