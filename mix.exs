@@ -1,7 +1,7 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
@@ -103,23 +103,6 @@ defmodule FlowStone.MixProject do
   defp description do
     """
     Asset-first data orchestration framework for Elixir/BEAM.
-
-    FlowStone treats data artifacts (assets) as first-class citizens, automatically
-    constructing execution DAGs from dependencies. Inspired by Dagster, but built
-    to leverage BEAM's fault tolerance, OTP supervision, and Phoenix LiveView for
-    real-time observability.
-
-    Features:
-    - Declarative asset definitions with compile-time validation
-    - Automatic DAG construction and dependency resolution
-    - PostgreSQL-backed materialization tracking with full lineage
-    - Partition-aware execution (time-based, tenant, custom)
-    - Human-in-the-loop checkpoint gates
-    - Oban-powered distributed job execution
-    - Cron scheduling and event-driven sensors
-    - Pluggable I/O managers (Postgres, S3, Parquet)
-    - Phoenix LiveView real-time dashboard
-    - Comprehensive telemetry and audit logging
     """
   end
 
@@ -143,6 +126,7 @@ defmodule FlowStone.MixProject do
       name: "FlowStone",
       source_ref: "v#{@version}",
       source_url: @source_url,
+      assets: %{"assets" => "assets"},
       extras: [
         {"README.md", [filename: "readme"]},
         "CHANGELOG.md",

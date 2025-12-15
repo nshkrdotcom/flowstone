@@ -12,26 +12,21 @@ defmodule FlowStone.Executor do
     io_opts = Keyword.get(opts, :io, [])
     use_repo = Keyword.get(opts, :use_repo, true)
 
+    # Use get_with_default to ensure nil doesn't override defaults
     resource_server =
-      Keyword.get(
-        opts,
-        :resource_server,
+      get_with_default(opts, :resource_server, fn ->
         Application.get_env(:flowstone, :resources_server, FlowStone.Resources)
-      )
+      end)
 
     lineage_server =
-      Keyword.get(
-        opts,
-        :lineage_server,
+      get_with_default(opts, :lineage_server, fn ->
         Application.get_env(:flowstone, :lineage_server, FlowStone.Lineage)
-      )
+      end)
 
     mat_store =
-      Keyword.get(
-        opts,
-        :materialization_store,
+      get_with_default(opts, :materialization_store, fn ->
         Application.get_env(:flowstone, :materialization_store, FlowStone.MaterializationStore)
-      )
+      end)
 
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
@@ -144,6 +139,15 @@ defmodule FlowStone.Executor do
       )
     else
       :ok
+    end
+  end
+
+  # Get a value from opts, falling back to default_fn if key is missing or nil.
+  # This prevents nil from overriding defaults (unlike Keyword.get/3).
+  defp get_with_default(opts, key, default_fn) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} when not is_nil(value) -> value
+      _ -> default_fn.()
     end
   end
 end

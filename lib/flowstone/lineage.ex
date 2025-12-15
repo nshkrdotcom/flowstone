@@ -49,7 +49,7 @@ defmodule FlowStone.Lineage do
         &(&1.asset_name == Atom.to_string(asset) and
             &1.partition == FlowStone.Partition.serialize(partition))
       )
-      |> Enum.map(&%{asset: String.to_atom(&1.upstream_asset), partition: &1.upstream_partition})
+      |> Enum.map(&%{asset: safe_to_atom(&1.upstream_asset), partition: &1.upstream_partition})
 
     {:reply, upstream, state}
   end
@@ -61,7 +61,7 @@ defmodule FlowStone.Lineage do
         &(&1.upstream_asset == Atom.to_string(asset) and
             &1.upstream_partition == FlowStone.Partition.serialize(partition))
       )
-      |> Enum.map(&%{asset: String.to_atom(&1.asset_name), partition: &1.partition})
+      |> Enum.map(&%{asset: safe_to_atom(&1.asset_name), partition: &1.partition})
 
     {:reply, downstream, state}
   end
@@ -69,4 +69,15 @@ defmodule FlowStone.Lineage do
   def handle_call({:record, records}, _from, state) do
     {:reply, :ok, %{state | entries: records ++ state.entries}}
   end
+
+  # Safely convert string to atom - only if atom already exists
+  # Returns the string as-is if not an existing atom
+  defp safe_to_atom(string) when is_binary(string) do
+    String.to_existing_atom(string)
+  rescue
+    ArgumentError -> string
+  end
+
+  defp safe_to_atom(atom) when is_atom(atom), do: atom
+  defp safe_to_atom(other), do: other
 end

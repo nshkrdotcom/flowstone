@@ -23,6 +23,21 @@ config :flowstone, Oban,
 config :hammer,
   backend: {Hammer.Backend.ETS, [expiry_ms: 60_000, cleanup_interval_ms: 60_000]}
 
+config :logger, :default_formatter,
+  metadata: [
+    :flowstone,
+    :event,
+    :asset,
+    :partition,
+    :run_id,
+    :duration_ms,
+    :type,
+    :message,
+    :retryable,
+    :error_type,
+    :error_message
+  ]
+
 config :logger, level: :info
 
 import_config "#{config_env()}.exs"

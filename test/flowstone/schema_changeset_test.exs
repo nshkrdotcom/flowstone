@@ -1,6 +1,8 @@
 defmodule FlowStone.SchemaChangesetTest do
   use FlowStone.TestCase, isolation: :full_isolation
 
+  alias FlowStone.Lineage.Entry
+
   test "materialization changeset" do
     attrs = %{asset_name: "a", run_id: Ecto.UUID.generate(), status: :pending}
 
@@ -20,7 +22,7 @@ defmodule FlowStone.SchemaChangesetTest do
       consumed_at: DateTime.utc_now()
     }
 
-    assert %{valid?: true} = FlowStone.Lineage.Entry.changeset(%FlowStone.Lineage.Entry{}, attrs)
+    assert %{valid?: true} = Entry.changeset(%Entry{}, attrs)
   end
 
   test "audit log changeset" do

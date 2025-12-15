@@ -87,7 +87,7 @@ defmodule FlowStone.LineagePersistence do
 
         Enum.map(rows, fn [name, part, mat_id, d] ->
           %{
-            asset: String.to_atom(name),
+            asset: safe_to_atom(name),
             partition: FlowStone.Partition.deserialize(part),
             materialization_id: mat_id,
             depth: d
@@ -148,7 +148,7 @@ defmodule FlowStone.LineagePersistence do
 
         Enum.map(rows, fn [name, part, run_id, d] ->
           %{
-            asset: String.to_atom(name),
+            asset: safe_to_atom(name),
             partition: FlowStone.Partition.deserialize(part),
             run_id: run_id,
             depth: d
@@ -188,20 +188,31 @@ defmodule FlowStone.LineagePersistence do
   defp normalize_depth(_), do: 1
 
   defp latest_status(%{asset: asset, partition: partition}, opts) do
-    cond do
-      use_repo?(opts) ->
-        Repo.one(
-          from m in Materialization,
-            where:
-              m.asset_name == ^Atom.to_string(asset) and
-                m.partition == ^FlowStone.Partition.serialize(partition),
-            order_by: [desc: m.inserted_at],
-            limit: 1,
-            select: m.status
-        )
+    asset_str = if is_atom(asset), do: Atom.to_string(asset), else: asset
 
-      true ->
-        nil
+    if use_repo?(opts) do
+      Repo.one(
+        from m in Materialization,
+          where:
+            m.asset_name == ^asset_str and
+              m.partition == ^FlowStone.Partition.serialize(partition),
+          order_by: [desc: m.inserted_at],
+          limit: 1,
+          select: m.status
+      )
+    else
+      nil
     end
   end
+
+  # Safely convert string to atom - only if atom already exists
+  # Returns the string as-is if not an existing atom
+  defp safe_to_atom(string) when is_binary(string) do
+    String.to_existing_atom(string)
+  rescue
+    ArgumentError -> string
+  end
+
+  defp safe_to_atom(atom) when is_atom(atom), do: atom
+  defp safe_to_atom(other), do: other
 end

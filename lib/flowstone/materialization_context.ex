@@ -29,13 +29,16 @@ defmodule FlowStone.MaterializationContext do
   end
 
   def latest(asset, partition, opts \\ []) do
+    asset_str = to_string(asset)
+    partition_str = FlowStone.Partition.serialize(partition)
+
     if use_repo?(opts) do
       Repo.one(
         from m in Materialization,
           where:
-            m.asset_name == ^Atom.to_string(asset) and
-              m.partition == ^FlowStone.Partition.serialize(partition),
-          order_by: [desc: m.inserted_at],
+            m.asset_name == ^asset_str and
+              m.partition == ^partition_str,
+          order_by: [desc: m.started_at, desc: m.inserted_at],
           limit: 1
       )
     else
@@ -43,8 +46,12 @@ defmodule FlowStone.MaterializationContext do
 
       store
       |> MaterializationStore.list()
-      |> Enum.filter(&(&1.asset == asset and &1.partition == partition))
-      |> List.last()
+      |> Enum.filter(fn entry ->
+        to_string(entry.asset) == asset_str and
+          FlowStone.Partition.serialize(entry.partition) == partition_str
+      end)
+      |> Enum.sort_by(& &1.started_at, {:desc, DateTime})
+      |> List.first()
     end
   end
 

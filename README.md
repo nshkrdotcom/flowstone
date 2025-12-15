@@ -4,6 +4,11 @@
 
 # FlowStone
 
+[![CI](https://github.com/nshkrdotcom/flowstone/actions/workflows/ci.yml/badge.svg)](https://github.com/nshkrdotcom/flowstone/actions/workflows/ci.yml)
+[![Hex.pm](https://img.shields.io/hexpm/v/flowstone.svg)](https://hex.pm/packages/flowstone)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/flowstone)
+[![License](https://img.shields.io/hexpm/l/flowstone.svg)](https://github.com/nshkrdotcom/flowstone/blob/main/LICENSE)
+
 **Asset-first orchestration for the BEAM.**
 
 FlowStone is a data orchestration framework for Elixir that treats data artifacts (assets) as first-class citizens. Inspired by [Dagster](https://dagster.io/), but built to leverage BEAM's fault tolerance, real-time capabilities, and operational simplicity.
@@ -116,7 +121,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:flowstone, "~> 0.1.0"}
+    {:flowstone, "~> 0.2.0"}
   ]
 end
 ```
@@ -183,15 +188,23 @@ FlowStone uses Oban for job execution but adds the asset-first layer on top.
 
 ## Status
 
-FlowStone is currently in **design phase**. The ADRs document the complete architecture, and implementation is planned.
+FlowStone is in **active development** with core functionality implemented:
 
-### Roadmap
+### Implemented
+- Asset DSL and Pipeline definitions
+- DAG construction from dependencies
+- Materialization execution with Oban job queue
+- In-memory and PostgreSQL I/O managers
+- Partition serialization with proper round-trip
+- Lineage tracking (in-memory and database)
+- Checkpoint/approval system
+- Materialization metadata persistence
+- Telemetry and structured error handling
 
-1. **Phase 1 (2 weeks)**: Core MVP - Asset DSL, DAG, in-memory I/O
-2. **Phase 2 (2 weeks)**: Persistence - PostgreSQL, S3, Oban integration
-3. **Phase 3 (2 weeks)**: UI - LiveView dashboard, asset graph
-4. **Phase 4 (1 week)**: Scheduling - Cron, sensors
-5. **Phase 5 (ongoing)**: Integrations - LLM, Python, dbt
+### Execution Model
+- **Synchronous**: When Oban is not running, `materialize/2` executes synchronously
+- **Asynchronous**: When Oban is running, `materialize/2` enqueues a job and returns `{:ok, %Oban.Job{}}`
+- Jobs persist runtime configuration via `FlowStone.RunConfig` for cross-restart resilience
 
 ## Contributing
 

@@ -5,6 +5,8 @@ defmodule FlowStone.TestCase do
 
   use ExUnit.CaseTemplate
 
+  alias Ecto.Adapters.SQL.Sandbox
+
   using opts do
     isolation = Keyword.get(opts, :isolation, :full_isolation)
 
@@ -14,8 +16,8 @@ defmodule FlowStone.TestCase do
   end
 
   setup tags do
-    owner = Ecto.Adapters.SQL.Sandbox.start_owner!(FlowStone.Repo, shared: not tags[:async])
-    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+    owner = Sandbox.start_owner!(FlowStone.Repo, shared: not tags[:async])
+    on_exit(fn -> Sandbox.stop_owner(owner) end)
     :ok
   end
 end

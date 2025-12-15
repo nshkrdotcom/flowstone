@@ -60,11 +60,9 @@ defmodule FlowStone.DAG do
 
   @spec detect_cycle(edge_map()) :: :ok | {:error, {:cycle, [asset_name()]}}
   defp detect_cycle(edges) do
-    try do
-      topological_names(%{edges: edges})
-      :ok
-    rescue
-      ArgumentError -> {:error, {:cycle, []}}
-    end
+    topological_names(%{edges: edges})
+    :ok
+  rescue
+    ArgumentError -> {:error, {:cycle, []}}
   end
 end

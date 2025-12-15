@@ -5,7 +5,11 @@ defmodule FlowStone.Application do
   @impl true
   def start(_type, _args) do
     children =
-      []
+      [
+        # RunConfig is always started - it's a lightweight ETS-based store
+        # used to pass runtime config to Oban workers
+        FlowStone.RunConfig
+      ]
       |> maybe_add_repo()
       |> maybe_add_pubsub()
       |> maybe_add_resources()

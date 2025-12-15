@@ -1,6 +1,8 @@
 defmodule FlowStone.Materializations do
   @moduledoc """
   Persistence wrapper for materialization metadata with Repo-or-fallback semantics.
+
+  Uses upsert logic to handle concurrent writes safely when using the database.
   """
 
   alias FlowStone.{Materialization, MaterializationStore, Repo}
@@ -11,7 +13,7 @@ defmodule FlowStone.Materializations do
 
     if use_repo?(opts) do
       params = %{
-        asset_name: Atom.to_string(asset),
+        asset_name: to_string(asset),
         partition: FlowStone.Partition.serialize(partition),
         run_id: run_id,
         status: :running,
@@ -19,9 +21,13 @@ defmodule FlowStone.Materializations do
         metadata: metadata
       }
 
+      # Use upsert to handle concurrent inserts safely
       %Materialization{}
       |> Materialization.changeset(params)
-      |> Repo.insert()
+      |> Repo.insert(
+        on_conflict: {:replace, [:status, :started_at, :metadata, :updated_at]},
+        conflict_target: [:asset_name, :partition, :run_id]
+      )
       |> normalize_result()
     else
       store = Keyword.get(opts, :store, MaterializationStore)
@@ -35,7 +41,7 @@ defmodule FlowStone.Materializations do
   @spec record_success(atom(), term(), binary(), integer(), keyword()) :: :ok | {:error, term()}
   def record_success(asset, partition, run_id, duration_ms, opts \\ []) do
     if use_repo?(opts) do
-      update_record(asset, partition, run_id, %{
+      upsert_record(asset, partition, run_id, %{
         status: :success,
         completed_at: DateTime.utc_now(),
         duration_ms: duration_ms
@@ -51,11 +57,17 @@ defmodule FlowStone.Materializations do
 
   @spec record_failure(atom(), term(), binary(), term(), keyword()) :: :ok | {:error, term()}
   def record_failure(asset, partition, run_id, error, opts \\ []) do
+    error_message =
+      case error do
+        %{message: msg} -> msg
+        other -> inspect(other)
+      end
+
     if use_repo?(opts) do
-      update_record(asset, partition, run_id, %{
+      upsert_record(asset, partition, run_id, %{
         status: :failed,
         completed_at: DateTime.utc_now(),
-        error_message: inspect(error)
+        error_message: error_message
       })
     else
       store = Keyword.get(opts, :store, MaterializationStore)
@@ -68,44 +80,37 @@ defmodule FlowStone.Materializations do
 
   def record_waiting_approval(asset, partition, run_id, opts \\ []) do
     if use_repo?(opts) do
-      update_record(asset, partition, run_id, %{
-        status: :waiting_approval,
-        completed_at: DateTime.utc_now()
+      upsert_record(asset, partition, run_id, %{
+        status: :waiting_approval
       })
     else
       :ok
     end
   end
 
-  defp update_record(asset, partition, run_id, changes) do
+  # Use upsert to safely handle concurrent writes
+  defp upsert_record(asset, partition, run_id, changes) do
     partition_str = FlowStone.Partition.serialize(partition)
+    asset_str = to_string(asset)
 
-    case Repo.get_by(Materialization,
-           asset_name: Atom.to_string(asset),
-           partition: partition_str,
-           run_id: run_id
-         ) do
-      nil ->
-        %Materialization{}
-        |> Materialization.changeset(
-          Map.merge(
-            %{
-              asset_name: Atom.to_string(asset),
-              partition: partition_str,
-              run_id: run_id
-            },
-            changes
-          )
-        )
-        |> Repo.insert()
-        |> normalize_result()
+    base_params = %{
+      asset_name: asset_str,
+      partition: partition_str,
+      run_id: run_id
+    }
 
-      record ->
-        record
-        |> Materialization.changeset(changes)
-        |> Repo.update()
-        |> normalize_result()
-    end
+    params = Map.merge(base_params, changes)
+
+    # Get the keys to update on conflict (all provided changes)
+    update_keys = Map.keys(changes) ++ [:updated_at]
+
+    %Materialization{}
+    |> Materialization.changeset(params)
+    |> Repo.insert(
+      on_conflict: {:replace, update_keys},
+      conflict_target: [:asset_name, :partition, :run_id]
+    )
+    |> normalize_result()
   end
 
   defp use_repo?(opts), do: Keyword.get(opts, :use_repo, true) and repo_running?()

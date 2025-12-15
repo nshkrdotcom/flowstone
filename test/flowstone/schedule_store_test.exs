@@ -1,6 +1,8 @@
 defmodule FlowStone.ScheduleStoreTest do
   use FlowStone.TestCase, isolation: :full_isolation
 
+  alias FlowStone.Schedules.Scheduler
+
   setup do
     {:ok, _} = start_supervised({FlowStone.ScheduleStore, name: :schedule_store})
     :ok
@@ -45,7 +47,7 @@ defmodule FlowStone.ScheduleStoreTest do
 
     # Trigger immediately
     schedule = hd(FlowStone.list_schedules(store: :schedule_store))
-    :ok = FlowStone.Schedules.Scheduler.run_now(schedule, pid)
+    :ok = Scheduler.run_now(schedule, pid)
 
     FlowStone.ObanHelpers.drain()
 
