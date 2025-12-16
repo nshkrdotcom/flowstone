@@ -1,304 +1,166 @@
 # FlowStone Design Overview
 
-This document provides a high-level overview of FlowStone's architecture and design principles.
+This document provides a high-level overview of FlowStone’s current architecture and primitives (v0.2.x). For detailed decisions and rationale, see `docs/adr/README.md`.
 
 ## Core Concepts
 
-### 1. Assets
+### 1) Assets
 
-An **asset** is a persistent, versioned data artifact. Assets are the fundamental building block of FlowStone.
+An **asset** is a named data artifact with explicit dependencies and an execution function.
+
+Assets are defined in Elixir via `FlowStone.Pipeline`:
 
 ```elixir
-asset :user_metrics do
-  description "Daily user engagement metrics"
-  depends_on [:raw_events, :user_profiles]
-  io_manager :postgres
-  table "analytics.user_metrics"
-  partitioned_by :date
+defmodule MyApp.Pipeline do
+  use FlowStone.Pipeline
 
-  execute fn context, %{raw_events: events, user_profiles: profiles} ->
-    metrics = compute_metrics(events, profiles, context.partition)
-    {:ok, metrics}
+  asset :raw_events do
+    description "Raw events from source systems"
+    execute fn _context, _deps -> {:ok, :raw} end
+  end
+
+  asset :daily_report do
+    depends_on [:raw_events]
+    execute fn _context, %{raw_events: events} -> {:ok, {:report, events}} end
   end
 end
 ```
 
-Key properties:
-- **Name**: Unique identifier (atom)
-- **Dependencies**: Other assets this asset depends on
-- **I/O Manager**: Where/how to store the asset's data
-- **Partition**: How to slice the data (date, tenant, etc.)
-- **Execute Function**: How to compute the asset's value
+### 2) Materialization
 
-### 2. Materialization
+**Materialization** computes and stores an asset’s value for a specific partition.
 
-**Materialization** is the act of computing and storing an asset's value for a specific partition.
+FlowStone records materialization metadata including:
 
-```
-Materialization = Asset + Partition → Stored Value
-```
+- `status` (`:pending`, `:running`, `:success`, `:failed`, `:waiting_approval`)
+- timing (`started_at`, `completed_at`, `duration_ms`)
+- run correlation (`run_id`)
 
-Each materialization is recorded with:
-- Status (pending, running, success, failed, waiting_approval)
-- Timing (started_at, completed_at, duration_ms)
-- Lineage (upstream assets and their partitions)
-- Metadata (hash, size, execution node, etc.)
+### 3) DAG (Directed Acyclic Graph)
 
-### 3. DAG (Directed Acyclic Graph)
+FlowStone derives a DAG from each asset’s `depends_on` list and uses it to:
 
-The **DAG** is automatically constructed from asset dependencies:
+- detect cycles
+- compute a topological ordering
+- traverse dependency sets for `materialize_all/2`
 
-```
-raw_events ─────┐
-                ├──→ cleaned_events ──→ daily_report
-user_profiles ──┘
-```
+Implementation: `lib/flowstone/dag.ex`.
 
-FlowStone uses the Runic library for DAG operations:
-- Topological sorting (execution order)
-- Cycle detection (at compile time)
-- Dependency traversal
+### 4) Partitions
 
-### 4. Partitioning
+Partitions are first-class values in code (e.g. `Date`, `DateTime`, tuples), but are serialized to strings for:
 
-**Partitions** divide an asset's data space:
+- database storage
+- Oban job args
 
-```elixir
-# Time-based partitioning
-partitioned_by :date
-# Each day is a separate partition: ~D[2025-01-15]
+FlowStone uses a tagged partition encoding to ensure unambiguous round-trips (see ADR-0003).
 
-# Custom partitioning (tenant x region x date)
-partitioned_by :custom
-partition_fn fn config ->
-  for tenant <- config.tenants,
-      region <- tenant.regions,
-      date <- config.date_range do
-    {tenant.id, region.id, date}
-  end
-end
-```
+Implementation: `lib/flowstone/partition.ex`.
 
-### 5. I/O Managers
+### 5) I/O Managers
 
-**I/O Managers** abstract storage backends:
+I/O managers implement `FlowStone.IO.Manager` and are selected via:
 
-| Manager | Use Case |
-|---------|----------|
-| `:memory` | Testing |
-| `:postgres` | Structured data |
-| `:s3` | Object storage |
-| `:parquet` | Analytics/Data science |
-| Custom | Any storage system |
+- application config (`:flowstone, :io_managers`, `:default_io_manager`)
+- call-time options (passed via `io:`)
 
-Each manager implements `load/3`, `store/4`, `delete/3`.
-
-### 6. Checkpoints
-
-**Checkpoints** pause workflow execution for approval:
+Example:
 
 ```elixir
-checkpoint :quality_review do
-  depends_on [:generated_content]
-
-  condition fn _context, %{generated_content: content} ->
-    content.confidence_score < 0.9
-  end
-
-  on_approve fn _context, deps, _approval ->
-    {:ok, deps.generated_content}
-  end
-
-  on_reject fn _context, _deps, approval ->
-    {:error, {:rejected, approval.reason}}
-  end
-end
+FlowStone.materialize(:daily_report,
+  partition: ~D[2025-01-15],
+  io: [io_manager: :memory, config: %{agent: MyApp.MemoryAgent}]
+)
 ```
 
-Checkpoints support:
-- Conditional triggering
-- Configurable timeouts
-- Escalation
-- Modification before approval
+Implementation: `lib/flowstone/io.ex`, `lib/flowstone/io/manager.ex`.
 
-### 7. Resources
+### 6) Approvals (Checkpoints)
 
-**Resources** are external dependencies injected into assets:
+Assets may request approval by returning `{:wait_for_approval, attrs}` from `execute`.
 
-```elixir
-# Define a resource
-defmodule MyApp.Resources.Database do
-  use FlowStone.Resource
+FlowStone persists the approval request (Repo-backed when enabled, otherwise in-memory) and marks the materialization as `:waiting_approval`.
 
-  def setup(config) do
-    {:ok, pool} = DBConnection.start_link(config)
-    {:ok, pool}
-  end
+Current core does not include a built-in continuation/resume mechanism after approval; host applications can resume by re-materializing the asset or by implementing a continuation model.
 
-  def health_check(pool) do
-    case DBConnection.execute(pool, "SELECT 1", []) do
-      {:ok, _} -> :healthy
-      {:error, _} -> {:unhealthy, :connection_failed}
-    end
-  end
-end
+Implementation: `lib/flowstone/materializer.ex`, `lib/flowstone/approvals.ex`.
 
-# Use in asset
-asset :db_data do
-  requires [:database]
+### 7) Resources
 
-  execute fn context, _deps ->
-    db = context.resources[:database]
-    {:ok, query_data(db)}
-  end
-end
-```
+Resources are injectable runtime dependencies managed by `FlowStone.Resources` (configured via `config :flowstone, :resources`).
 
-### 8. Lineage
+`FlowStone.Context.build/4` injects a subset of resources based on `asset.requires`.
 
-**Lineage** tracks data provenance:
+Implementation: `lib/flowstone/resources.ex`, `lib/flowstone/context.ex`.
 
-```elixir
-# Upstream: What did this asset consume?
-FlowStone.Lineage.upstream(:daily_report, ~D[2025-01-15])
-# => [
-#   %{asset: :cleaned_events, partition: ~D[2025-01-15], depth: 1},
-#   %{asset: :raw_events, partition: ~D[2025-01-15], depth: 2}
-# ]
+### 8) Lineage and Audit
 
-# Downstream: What consumes this asset?
-FlowStone.Lineage.downstream(:raw_events, ~D[2025-01-15])
+FlowStone records lineage edges after successful materialization and exposes query APIs for:
 
-# Impact: What needs recomputation if this changes?
-FlowStone.Lineage.impact(:raw_events, ~D[2025-01-15])
-```
+- upstream dependency trees
+- downstream dependents
+- impact analysis
+
+Repo-backed lineage uses recursive CTEs with bounded depth; there is an in-memory fallback when a lineage server is running.
+
+Implementation: `lib/flowstone/lineage_persistence.ex`.
+
+Audit events can be recorded to `flowstone_audit_log` when Repo usage is enabled.
+
+Implementation: `lib/flowstone/audit_log_context.ex`.
+
+### 9) Scheduling and Sensors
+
+FlowStone includes:
+
+- a lightweight in-process scheduler for cron-like schedules (`FlowStone.Schedules.Scheduler`)
+- a `FlowStone.Sensor` behaviour and generic polling worker (`FlowStone.Sensors.Worker`)
+
+Schedules are stored in-memory by default and must be persisted/reloaded by the host app if durability is required.
+
+Implementation: `lib/flowstone/schedules/scheduler.ex`, `lib/flowstone/sensors/worker.ex`.
 
 ## Architecture Layers
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    User Application                      │
-│  (Asset definitions, business logic, custom I/O managers)│
+│                    Host Application                      │
+│  (pipelines, resources, IO config, supervision, UI)      │
 └────────────────────────────┬────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────┐
 │                   FlowStone Core API                     │
-│  materialize/2, schedule/2, lineage/2, checkpoint/1      │
+│  materialize/2, materialize_all/2, backfill/2, schedule/2│
 └────────────────────────────┬────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────┐
-│                   Component Layer                        │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │  Asset   │  │   DAG    │  │ Executor │  │   I/O    │ │
-│  │  Engine  │  │ (Runic)  │  │  (Oban)  │  │ Managers │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
-│  │ Lineage  │  │ Scheduler│  │ Sensors  │  │Checkpoint│ │
-│  │ Tracker  │  │          │  │          │  │ Manager  │ │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+│                    Core Components                        │
+│  DAG · Executor · Materializer · IO · Lineage · Approvals │
 └────────────────────────────┬────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────┐
-│                  Persistence Layer                       │
-│     PostgreSQL (Ecto) + S3 + Custom I/O Managers         │
-└────────────────────────────┬────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────┐
-│                      UI Layer                            │
-│              Phoenix LiveView Dashboard                  │
+│                  Persistence / Execution                  │
+│          PostgreSQL (Ecto) + Oban (jobs, retries)          │
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Execution Flow
+## Execution Flow (High Level)
 
-```
-1. User calls FlowStone.materialize(:my_asset, partition: ~D[2025-01-15])
-
-2. FlowStone builds execution plan from DAG
-   - Resolve all dependencies
-   - Topologically sort for execution order
-
-3. For each asset in order:
-   a. Check if already materialized (skip if not force)
-   b. Load dependencies from I/O managers
-   c. Build context (partition, resources, run_id)
-   d. Execute asset function
-   e. Store result via I/O manager
-   f. Record materialization metadata
-   g. Record lineage entries
-   h. If checkpoint, pause and wait for approval
-
-4. Return result to user
-```
+1. Define assets in a pipeline module and register them into a registry.
+2. Call `FlowStone.materialize/2` with an asset name and partition.
+3. If Oban is running:
+   - enqueue a job with JSON-safe args
+   - store non-JSON runtime wiring in `FlowStone.RunConfig` keyed by `run_id`
+4. The worker resolves the asset safely against the registry, loads dependencies, executes the asset, stores output via IO manager, and records metadata + lineage.
 
 ## Design Principles
 
-### 1. Elixir DSL, Not YAML
+1. **Assets, not tasks**: Data artifacts are the contract.
+2. **Explicit dependencies**: Derived DAG, no hidden coupling.
+3. **Safe persisted boundaries**: JSON-safe args, no unbounded atom creation.
+4. **Testability**: injectable servers/resources and deterministic boundary tests.
+5. **Observability**: telemetry events and optional audit log persistence.
 
-```elixir
-# YES: Compile-time validated Elixir
-asset :my_asset do
-  depends_on [:other_asset]
-  execute fn context, deps -> ... end
-end
+## References
 
-# NO: Runtime-parsed YAML with string keys
-# steps:
-#   - name: my_step
-#     type: transform
-```
-
-### 2. Dependency Injection, Not Global State
-
-```elixir
-# YES: Resources injected via context
-execute fn context, deps ->
-  db = context.resources[:database]
-  db.query(...)
-end
-
-# NO: Global lookup
-execute fn _context, _deps ->
-  db = Application.get_env(:my_app, :database)
-  db.query(...)
-end
-```
-
-### 3. Structured Errors, Not Blanket Rescue
-
-```elixir
-# YES: Typed errors with retry intelligence
-{:error, %FlowStone.Error{type: :io_error, retryable: true}}
-
-# NO: Generic catch-all
-rescue
-  error -> {:error, inspect(error)}
-```
-
-### 4. Explicit Over Implicit
-
-```elixir
-# YES: Explicit dependencies and resources
-asset :report do
-  depends_on [:data]
-  requires [:api_client]
-  ...
-end
-
-# NO: Hidden dependencies discovered at runtime
-```
-
-## Technology Stack
-
-| Component | Library | Purpose |
-|-----------|---------|---------|
-| DAG Engine | Runic | Dependency resolution |
-| Job Queue | Oban | Reliable job execution |
-| Persistence | Ecto | Database access |
-| Web UI | Phoenix LiveView | Real-time dashboard |
-| PubSub | Phoenix.PubSub | Event broadcasting |
-| Telemetry | :telemetry | Observability |
-
-## Next Steps
-
-See the [ADR index](../adr/README.md) for detailed documentation of each design decision.
+- `docs/adr/README.md`

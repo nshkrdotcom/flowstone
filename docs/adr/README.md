@@ -6,21 +6,22 @@ This directory contains Architecture Decision Records (ADRs) for FlowStone, docu
 
 | ADR | Title | Status | Summary |
 |-----|-------|--------|---------|
-| [0001](0001-asset-first-orchestration.md) | Asset-First Orchestration Model | Accepted | Data artifacts as first-class citizens, not steps |
-| [0002](0002-dag-engine-persistence.md) | DAG Engine with Persistent Metadata | Accepted | Runic for DAG, Ecto/PostgreSQL for persistence |
-| [0003](0003-partitioning-isolation.md) | Partition-Aware Execution and Tenant Isolation | Accepted | Time-based and custom partitioning with RLS |
-| [0004](0004-io-manager-abstraction.md) | I/O Manager Abstraction | Accepted | Pluggable storage backends (Postgres, S3, Parquet) |
-| [0005](0005-checkpoint-approval-gates.md) | Checkpoint and Approval Gate Pattern | Accepted | Human-in-the-loop approval workflows |
-| [0006](0006-oban-job-execution.md) | Oban-Based Job Execution | Accepted | Reliable distributed job execution |
-| [0007](0007-scheduling-sensors.md) | Scheduling and Sensor Framework | Accepted | Cron scheduling and event-driven triggers |
-| [0008](0008-resource-injection.md) | Resource Injection Pattern | Accepted | Dependency injection for external resources |
-| [0009](0009-error-handling.md) | Structured Error Handling | Accepted | Typed errors with retry intelligence |
-| [0010](0010-elixir-dsl-not-yaml.md) | Elixir DSL, Not YAML | Accepted | Compile-time validated Elixir macros |
-| [0011](0011-observability-telemetry.md) | Observability and Telemetry | Accepted | :telemetry, structured logging, audit trails |
-| [0012](0012-liveview-ui.md) | Phoenix LiveView UI Integration | Accepted | Real-time dashboard with WebSocket updates |
-| [0013](0013-testing-strategies.md) | Testing Strategies | Accepted | Mox, dependency injection, Oban testing |
-| [0014](0014-lineage-reporting.md) | Lineage and Audit Reporting | Accepted | Complete data provenance and impact analysis |
-| [0015](0015-external-integrations.md) | External System Integration Patterns | Accepted | LLM, Python/ML, dbt, notifications |
+| [0001](0001-asset-first-orchestration.md) | Asset-First Orchestration Model | Accepted | Assets as the primary abstraction |
+| [0002](0002-dag-engine-persistence.md) | DAG Engine and Persistent Metadata | Accepted | Internal DAG + Postgres-backed metadata |
+| [0003](0003-partitioning-isolation.md) | Partition-Aware Execution and (Optional) Tenant Isolation | Accepted | Tagged partition encoding; isolation is modeled, not enforced |
+| [0004](0004-io-manager-abstraction.md) | I/O Manager Abstraction | Accepted | Pluggable storage via I/O managers |
+| [0005](0005-checkpoint-approval-gates.md) | Checkpoint and Approval Gates | Accepted | Persisted approval requests and decisions |
+| [0006](0006-oban-job-execution.md) | Oban-Based Job Execution | Accepted | JSON-safe args + RunConfig for runtime wiring |
+| [0007](0007-scheduling-sensors.md) | Scheduling and Sensor Framework | Accepted | Lightweight scheduler + sensor polling worker |
+| [0008](0008-resource-injection.md) | Resource Injection Pattern | Accepted | Injectable resources with test overrides |
+| [0009](0009-error-handling.md) | Structured Error Handling | Accepted | `FlowStone.Error` + retry semantics |
+| [0010](0010-elixir-dsl-not-yaml.md) | Elixir DSL (Not YAML) | Accepted | Elixir macros as the primary interface |
+| [0011](0011-observability-telemetry.md) | Observability and Telemetry | Accepted | Telemetry events, metrics, audit log |
+| [0012](0012-liveview-ui.md) | Phoenix LiveView UI Integration | Proposed | Optional UI integration layer |
+| [0013](0013-testing-strategies.md) | Testing Strategies | Accepted | Isolation, sandboxing, and boundary tests |
+| [0014](0014-lineage-reporting.md) | Lineage and Audit Reporting | Accepted | Lineage edges + recursive queries |
+| [0015](0015-external-integrations.md) | External Integration Patterns | Proposed | Patterns for IO/resources/sensors integrations |
+| [0016](0016-runtime-serialization-boundaries.md) | Runtime Serialization Boundaries and Identifier Safety | Accepted | JSON/persistence boundary rules and safe identifiers |
 
 ## How to Read
 

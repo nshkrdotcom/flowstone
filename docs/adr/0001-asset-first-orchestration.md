@@ -5,92 +5,78 @@ Accepted
 
 ## Context
 
-Traditional workflow orchestration systems are task-centric: they define sequences of operations (steps, jobs, tasks) that execute in order. This creates several problems:
+Task-centric orchestration (“steps in order”) tends to produce:
 
-1. **Implicit Data Contracts**: The data flowing between steps is implicit, making lineage tracking and debugging difficult.
-2. **Non-Idempotent Execution**: Re-running a workflow may produce different results depending on external state.
-3. **Opaque Dependencies**: Understanding what data a step needs requires reading its implementation.
-4. **Difficult Incremental Updates**: When source data changes, it's unclear which downstream results are invalidated.
+1. implicit data contracts between steps
+2. weak lineage/auditability (“where did this come from?”)
+3. hard-to-reason re-execution semantics
 
-Asset-first systems (pioneered by Dagster) invert this model: data artifacts are first-class citizens, and execution is derived from asset dependencies.
+Asset-first systems invert the model: define the data artifacts (“assets”) and derive execution from their declared dependencies.
 
 ## Decision
 
-FlowStone adopts an asset-first orchestration model where:
-
 ### 1. Assets are the Primary Abstraction
 
-An **asset** is a persistent, versioned data artifact with:
-- A unique name
-- Explicit dependencies on other assets
-- A materialization function that produces the asset's value
-- Storage configuration (I/O manager)
-- Optional partitioning scheme
+An asset is a named data artifact with:
+
+- a unique name (atom in code)
+- explicit dependencies (`depends_on`)
+- an execution function that computes the value (`execute`)
+
+Assets are defined via the `FlowStone.Pipeline` DSL.
 
 ```elixir
-asset :daily_analytics do
-  description "Aggregated analytics for dashboard consumption"
-  depends_on [:raw_events, :user_profiles]
-  io_manager :postgres
-  partitioned_by :date
+defmodule MyApp.Pipeline do
+  use FlowStone.Pipeline
 
-  execute fn context, %{raw_events: events, user_profiles: profiles} ->
-    analytics = compute_analytics(events, profiles, context.partition)
-    {:ok, analytics}
+  asset :raw do
+    description "Raw input"
+    execute fn _context, _deps -> {:ok, :raw} end
+  end
+
+  asset :clean do
+    depends_on [:raw]
+    execute fn _context, %{raw: raw} -> {:ok, {:clean, raw}} end
   end
 end
 ```
 
-### 2. DAG is Derived from Dependencies
+### 2. The DAG is Derived From Dependencies
 
-The execution graph is automatically constructed from asset dependencies:
-- No explicit step ordering required
-- Cycle detection at definition time
-- Automatic parallelization of independent branches
+FlowStone builds an execution graph from `depends_on` and derives ordering from the DAG.
 
-### 3. Materialization is the Unit of Execution
+Implementation: `lib/flowstone/dag.ex`.
 
-**Materialization** = computing and storing an asset's value for a specific partition:
-- Recorded with timing, lineage, and metadata
-- Enables reproducibility and audit trails
-- Supports incremental re-computation
+### 3. Materialization is the Unit of Execution and Audit
 
-### 4. Lineage is First-Class
+Materialization = computing (and storing) an asset’s value for a partition.
 
-Every materialization records:
-- Upstream assets consumed (with their partition versions)
-- Downstream assets produced
-- Execution metadata (duration, executor, node)
+FlowStone records materialization metadata and lineage so that runs can be audited and impact can be analyzed.
 
-This enables:
-- Impact analysis ("what breaks if this changes?")
-- Root cause analysis ("where did this bad data come from?")
-- Smart invalidation ("only recompute what's stale")
+Implementation:
+- execution: `lib/flowstone/executor.ex`, `lib/flowstone/materializer.ex`
+- persistence: `lib/flowstone/materializations.ex`, `lib/flowstone/lineage_persistence.ex`
+
+### 4. Identifier Policy
+
+Within Elixir code, assets are referenced by atoms. Across persistence and job boundaries (database rows, Oban args), assets are represented as strings and resolved safely against a known registry of assets (no unbounded atom creation).
 
 ## Consequences
 
 ### Positive
 
-1. **Debuggability**: Trace any data artifact back to its sources.
-2. **Idempotency**: Re-materialization produces identical results (given same inputs).
-3. **Incremental Updates**: Only recompute invalidated downstream assets.
-4. **Self-Documenting**: Asset definitions describe data contracts explicitly.
-5. **Testability**: Assets can be tested in isolation with mocked dependencies.
+1. Dependencies and data contracts are explicit.
+2. Lineage and auditability are natural outputs of the model.
+3. Assets are testable in isolation.
 
 ### Negative
 
-1. **Learning Curve**: Developers familiar with task-centric systems need to shift mental models.
-2. **Metadata Overhead**: Tracking lineage requires persistent storage and queries.
-3. **Not for Streaming**: This model suits batch/micro-batch, not continuous streams (use Broadway for that).
-
-### Anti-Patterns Avoided (from pipeline_ex analysis)
-
-- **No YAML DSL**: Asset definitions are Elixir code with compile-time validation.
-- **No String Keys**: All asset references are atoms, validated at compile time.
-- **No Global Process State**: Context is passed explicitly, not stored in process dictionary.
-- **No Runtime Type Discovery**: Asset registry knows all assets at compile time.
+1. Users must adopt an asset-first mental model.
+2. Correctness depends on persistence and consistent partition encoding.
 
 ## References
 
-- Dagster's Software-Defined Assets: https://docs.dagster.io/concepts/assets/software-defined-assets
-- pipeline_ex anti-pattern analysis: YAML string keys, runtime type checking, implicit data contracts
+- `lib/flowstone/pipeline.ex`
+- `lib/flowstone/dag.ex`
+- `docs/adr/0002-dag-engine-persistence.md`
+- `docs/adr/0003-partitioning-isolation.md`

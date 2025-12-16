@@ -1,205 +1,78 @@
-# ADR-0003: Partition-Aware Execution and Tenant Isolation
+# ADR-0003: Partition-Aware Execution and (Optional) Tenant Isolation
 
 ## Status
 Accepted
 
 ## Context
 
-Real-world orchestration requires:
+Real-world orchestration frequently needs to run per:
 
-1. **Time-Based Processing**: Daily, hourly, or custom time windows.
-2. **Multi-Tenant SaaS**: Isolated execution per customer/organization.
-3. **Regional Segmentation**: Process data per geographic region.
-4. **Backfill Support**: Recompute historical partitions without affecting current data.
+- Time window (daily/hourly/etc.)
+- Tenant/organization (multi-tenant SaaS)
+- Region/category
+- Composite key combining multiple dimensions
 
-We need a flexible partitioning model that supports these use cases while maintaining strict isolation.
+Partitions must also round-trip through:
+- persistent metadata storage (PostgreSQL)
+- cross-process/job boundaries (Oban args)
 
 ## Decision
 
-### 1. Partition as First-Class Concept
+### 1. Partitions are First-Class Values in Code, Stored as Strings
 
-A **partition** is a subdivision of an asset's data space, typically representing:
-- A time period (date, hour, week)
-- A tenant/organization
-- A region or category
-- A composite key combining multiple dimensions
+In Elixir code, partitions are regular values (e.g., `Date`, `DateTime`, tuples). For persistence and job arguments, partitions are serialized to strings.
 
-```elixir
-# Time-based partitioning
-asset :daily_metrics do
-  partitioned_by :date
+### 2. Tagged Partition Encoding (Unambiguous Round-Trip)
 
-  execute fn context, deps ->
-    date = context.partition  # ~D[2025-01-15]
-    {:ok, compute_metrics_for_date(date)}
-  end
-end
-
-# Custom partitioning (tenant x region x date)
-asset :regional_report do
-  partitioned_by :custom
-
-  partition_fn fn config ->
-    for tenant <- config.tenants,
-        region <- tenant.regions,
-        date <- Date.range(config.start_date, config.end_date) do
-      {tenant.id, region.id, date}
-    end
-  end
-
-  execute fn context, deps ->
-    {tenant_id, region_id, date} = context.partition
-    with_tenant_context(tenant_id, fn ->
-      {:ok, generate_report(region_id, date)}
-    end)
-  end
-end
-```
-
-### 2. Partition Key Structure
-
-Partitions are serialized to strings for storage but typed in code:
+FlowStone uses a tagged string encoding for partitions to avoid collisions and ambiguity (e.g. strings containing `|`):
 
 | Partition Type | Elixir Value | Serialized |
-|---------------|--------------|------------|
-| Date | `~D[2025-01-15]` | `"2025-01-15"` |
-| DateTime | `~U[2025-01-15 02:00:00Z]` | `"2025-01-15T02:00:00Z"` |
-| Tuple | `{"acme", "oslo", ~D[2025-01-15]}` | `"acme|oslo|2025-01-15"` |
-| Custom | `%MyPartition{...}` | JSON-encoded |
+|---|---|---|
+| Date | `~D[2025-01-15]` | `d:2025-01-15` |
+| DateTime | `~U[2025-01-15 02:00:00Z]` | `dt:2025-01-15T02:00:00Z` |
+| NaiveDateTime | `~N[2025-01-15 02:00:00]` | `ndt:2025-01-15T02:00:00` |
+| Tuple | `{"acme", "oslo", ~D[2025-01-15]}` | `t:<base64url(json)>` |
+| String w/ reserved chars | `"a|b"` | `s:<base64url>` |
+| Plain string | `"p1"` | `p1` |
 
-### 3. Backfill Support
+Legacy `|`-separated tuple strings are still accepted for **reading** (deserialize) for backward compatibility, but are not emitted by `serialize/1`.
 
-```elixir
-# Backfill a date range
-FlowStone.backfill(:daily_metrics,
-  start_partition: ~D[2024-01-01],
-  end_partition: ~D[2024-12-31],
-  max_parallel: 10
-)
+Implementation: `lib/flowstone/partition.ex`.
 
-# Backfill specific partitions
-FlowStone.backfill(:regional_report,
-  partitions: [
-    {"acme", "oslo", ~D[2025-01-01]},
-    {"acme", "oslo", ~D[2025-01-02]}
-  ]
-)
-```
+### 3. Backfill is Partition-Driven
 
-Backfill execution:
-1. Generate all partition keys from range/list
-2. Check existing materializations (skip if `force: false`)
-3. Queue as Oban jobs with configurable parallelism
-4. Track progress in real-time via PubSub
+Backfill executes the same asset across many partitions:
 
-### 4. Tenant Isolation
+- Generate partitions from an explicit list or a supported range (e.g. `Date.range/2`)
+- Optionally skip partitions that already have a successful materialization (`force: false`)
+- Execute with bounded parallelism when running synchronously
+- Enqueue jobs when running under Oban (Oban queue concurrency controls execution)
 
-For multi-tenant SaaS deployments, isolation is enforced at multiple levels:
+Implementation: `lib/flowstone.ex` and `lib/flowstone/backfill.ex`.
 
-#### Level 1: Partition Key Includes Tenant
+### 4. Tenant Isolation is Modeled, Not Enforced by Core
 
-```elixir
-# Partition key always includes tenant
-context.partition = {"tenant_123", "2025-01-15"}
-```
+FlowStone core does not impose a specific multi-tenancy model. Tenant isolation can be achieved by:
 
-#### Level 2: Row-Level Security (RLS)
-
-```sql
--- PostgreSQL RLS policy
-ALTER TABLE flowstone_materializations ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON flowstone_materializations
-  USING (
-    (metadata->>'tenant_id')::uuid = current_setting('flowstone.tenant_id', true)::uuid
-  );
-```
-
-```elixir
-defmodule FlowStone.TenantContext do
-  def with_tenant(tenant_id, fun) do
-    Repo.query!("SET LOCAL flowstone.tenant_id = $1", [tenant_id])
-    fun.()
-  end
-end
-```
-
-#### Level 3: I/O Manager Isolation
-
-```elixir
-asset :tenant_data do
-  io_manager :s3
-
-  # Bucket per tenant
-  bucket fn context ->
-    {tenant_id, _date} = context.partition
-    "data-#{tenant_id}"
-  end
-
-  # Or path isolation within shared bucket
-  path fn context ->
-    {tenant_id, date} = context.partition
-    "tenants/#{tenant_id}/data/#{date}.parquet"
-  end
-end
-```
-
-### 5. Access Control (Guard Framework)
-
-For tiered access to assets:
-
-```elixir
-defmodule FlowStone.Guard do
-  @callback can_access?(asset :: atom(), context :: map()) :: boolean()
-  @callback can_materialize?(asset :: atom(), context :: map()) :: boolean()
-end
-
-defmodule MyApp.TierGuard do
-  @behaviour FlowStone.Guard
-
-  def can_access?(asset, %{tenant: tenant}) do
-    required_tier = FlowStone.Asset.metadata(asset)[:required_tier]
-    tier_level(tenant.tier) >= tier_level(required_tier)
-  end
-
-  defp tier_level(:basic), do: 1
-  defp tier_level(:standard), do: 2
-  defp tier_level(:premium), do: 3
-  defp tier_level(:enterprise), do: 4
-end
-```
-
-```elixir
-asset :advanced_analytics do
-  metadata %{required_tier: :premium}
-  tags ["tier:premium", "tier:enterprise"]
-
-  execute fn context, deps -> ... end
-end
-```
+- encoding tenant identity into the partition key (e.g. `{tenant_id, date}`)
+- using separate storage namespaces (per-tenant tables/buckets/prefixes) in I/O manager configuration
+- applying host-application access control and database RLS policies where required
 
 ## Consequences
 
 ### Positive
 
-1. **Flexible Partitioning**: Support for time, tenant, region, or any composite key.
-2. **Parallel Backfill**: Process historical data efficiently.
-3. **Multi-Tenant Ready**: Isolation enforced at storage and query levels.
-4. **Tiered Features**: Control asset access by subscription tier.
+1. Partitions round-trip safely across storage and job boundaries.
+2. Tagged encoding avoids ambiguous parsing and string collision hazards.
+3. Tenant isolation can be implemented without constraining the core to one model.
 
 ### Negative
 
-1. **Partition Key Discipline**: Developers must consistently include tenant in partition keys.
-2. **RLS Overhead**: Row-level security adds query planning cost.
-3. **Configuration Complexity**: Multi-tenant requires careful I/O manager setup.
-
-### Anti-Patterns Avoided
-
-- **No Process Dictionary for Tenant Context**: Use explicit `with_tenant/2` function.
-- **No Global Tenant State**: Tenant ID always passed in context or partition.
-- **No Shared Checkpoints**: Each tenant's materializations are isolated.
+1. Encoded partitions (especially tuples) trade readability for correctness.
+2. Host applications must implement their own tenant access control model.
 
 ## References
 
-- PostgreSQL Row-Level Security: https://www.postgresql.org/docs/current/ddl-rowsecurity.html
-- pipeline_ex issue: shared checkpoint files across tenants
+- `lib/flowstone/partition.ex`
+- `lib/flowstone/backfill.ex`
+- `lib/flowstone.ex`

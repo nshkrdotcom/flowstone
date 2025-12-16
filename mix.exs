@@ -147,7 +147,8 @@ defmodule FlowStone.MixProject do
         "docs/adr/0012-liveview-ui.md",
         "docs/adr/0013-testing-strategies.md",
         "docs/adr/0014-lineage-reporting.md",
-        "docs/adr/0015-external-integrations.md"
+        "docs/adr/0015-external-integrations.md",
+        "docs/adr/0016-runtime-serialization-boundaries.md"
       ],
       groups_for_extras: [
         "Architecture Decision Records": Path.wildcard("docs/adr/*.md"),

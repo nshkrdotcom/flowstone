@@ -1,4 +1,4 @@
-# ADR-0002: DAG Engine with Persistent Metadata
+# ADR-0002: DAG Engine and Persistent Metadata
 
 ## Status
 Accepted
@@ -15,27 +15,26 @@ We need a persistence layer that supports these requirements while integrating w
 
 ## Decision
 
-### 1. Runic for DAG Construction
+### 1. DAG Construction
 
-Use the **Runic** library (~> 0.1) for DAG operations:
+FlowStone constructs a DAG from declared assets. The execution graph is derived from each asset's explicit
+`depends_on` list.
 
 ```elixir
-# Build workflow from asset definitions
-defp build_dag(assets) do
-  Runic.DAG.new()
-  |> add_assets(assets)
-  |> Runic.DAG.topological_sort()
-end
+# Build a DAG from assets (simplified)
+{:ok, graph} = FlowStone.DAG.from_assets(assets)
+execution_order = FlowStone.DAG.topological_names(graph)
 ```
 
-Runic provides:
-- Topological sorting with cycle detection
-- Efficient dependency traversal
-- Lightweight (no external dependencies)
+The core DAG representation is:
+- `nodes`: `%{asset_name => %FlowStone.Asset{...}}`
+- `edges`: `%{asset_name => [dependency_asset_name, ...]}`
 
-### 2. Ecto for Persistence
+This is implemented in `lib/flowstone/dag.ex`.
 
-Use **Ecto** with PostgreSQL for materialization tracking:
+### 2. Persistence with Ecto/PostgreSQL
+
+FlowStone persists execution metadata and auditability primitives via Ecto/PostgreSQL:
 
 ```elixir
 defmodule FlowStone.Materialization do
@@ -46,18 +45,12 @@ defmodule FlowStone.Materialization do
     field :partition, :string
     field :run_id, Ecto.UUID
     field :status, Ecto.Enum, values: [:pending, :running, :success, :failed, :waiting_approval]
-
-    # Timing
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
     field :duration_ms, :integer
-
-    # Lineage
     field :upstream_assets, {:array, :string}
     field :upstream_partitions, {:array, :string}
     field :dependency_hash, :string  # Hash of upstream content for invalidation
-
-    # Metadata
     field :metadata, :map  # Flexible storage for asset-specific data
     field :error_message, :string
     field :executor_node, :string
@@ -67,97 +60,24 @@ defmodule FlowStone.Materialization do
 end
 ```
 
-### 3. Schema Design
+The key tables are:
+- `flowstone_materializations` (execution metadata)
+- `flowstone_lineage` (consumption edges between materializations)
+- `flowstone_approvals` (checkpoint approval requests/decisions)
+- `flowstone_audit_log` (immutable audit events)
+- Oban tables (job execution)
 
-```sql
-CREATE TABLE flowstone_materializations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  asset_name VARCHAR(255) NOT NULL,
-  partition VARCHAR(255),
-  run_id UUID NOT NULL,
-  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+Materializations are identified by `{asset_name, partition, run_id}` and enforced via a unique index
+(see `priv/repo/migrations/0005_add_materialization_unique_index.exs`).
 
-  started_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ,
-  duration_ms INTEGER,
+Partition values are stored as strings using `FlowStone.Partition.serialize/1` (see ADR-0003).
 
-  upstream_assets TEXT[],
-  upstream_partitions TEXT[],
-  dependency_hash VARCHAR(64),
+### 3. Lineage as First-Class Rows (Not Arrays)
 
-  metadata JSONB DEFAULT '{}',
-  error_message TEXT,
-  executor_node VARCHAR(255),
+FlowStone stores lineage edges in `flowstone_lineage` rows and queries transitive lineage using recursive CTEs.
+This is implemented in `lib/flowstone/lineage_persistence.ex`.
 
-  inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Performance indexes
-CREATE INDEX idx_materializations_asset_partition
-  ON flowstone_materializations(asset_name, partition);
-CREATE INDEX idx_materializations_run_id
-  ON flowstone_materializations(run_id);
-CREATE INDEX idx_materializations_status
-  ON flowstone_materializations(status);
-CREATE INDEX idx_materializations_inserted_at
-  ON flowstone_materializations(inserted_at DESC);
-
--- Lineage query support (GIN for array containment)
-CREATE INDEX idx_materializations_upstream_assets
-  ON flowstone_materializations USING GIN(upstream_assets);
-```
-
-### 4. Lineage Query Implementation
-
-```elixir
-defmodule FlowStone.Lineage do
-  @doc "Get all upstream assets for a materialization"
-  def upstream(asset_name, partition) do
-    query = from m in Materialization,
-      where: m.asset_name == ^asset_name and m.partition == ^partition,
-      order_by: [desc: m.completed_at],
-      limit: 1
-
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      mat -> {:ok, expand_upstream(mat.upstream_assets, mat.upstream_partitions)}
-    end
-  end
-
-  @doc "Get all downstream assets that depend on this asset"
-  def downstream(asset_name, partition) do
-    query = from m in Materialization,
-      where: ^asset_name in m.upstream_assets,
-      select: %{asset: m.asset_name, partition: m.partition}
-
-    {:ok, Repo.all(query)}
-  end
-
-  @doc "Calculate impact: what needs recomputation if this asset changes"
-  def impact(asset_name, partition) do
-    # Recursive CTE for transitive closure
-    query = """
-    WITH RECURSIVE downstream AS (
-      SELECT DISTINCT asset_name, partition
-      FROM flowstone_materializations
-      WHERE $1 = ANY(upstream_assets)
-
-      UNION
-
-      SELECT DISTINCT m.asset_name, m.partition
-      FROM flowstone_materializations m
-      INNER JOIN downstream d ON d.asset_name = ANY(m.upstream_assets)
-    )
-    SELECT * FROM downstream
-    """
-
-    {:ok, Repo.query!(query, [asset_name])}
-  end
-end
-```
-
-### 5. Run Correlation
+### 4. Run Correlation
 
 Each workflow execution gets a unique `run_id` (UUID v4) that:
 - Links all materializations in a single execution
@@ -191,5 +111,9 @@ Each workflow execution gets a unique `run_id` (UUID v4) that:
 
 ## References
 
-- Runic library: hex.pm/packages/runic
-- Dagster's run storage: https://docs.dagster.io/concepts/dagit/graphql
+- `lib/flowstone/dag.ex`
+- `lib/flowstone/materializations.ex`
+- `lib/flowstone/lineage_persistence.ex`
+- `priv/repo/migrations/0001_create_materializations.exs`
+- `priv/repo/migrations/0003_create_lineage.exs`
+- `priv/repo/migrations/0005_add_materialization_unique_index.exs`
