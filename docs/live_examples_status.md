@@ -12,6 +12,7 @@ This document tracks what the live examples (in `examples/`) currently demonstra
 - Sensors (mock S3 file arrival) triggering materializations.
 - External IO via Postgres manager, including composite partitions.
 - Failure-path demonstration with materialization recording.
+- Parallel branches with join coordination and partial failure handling.
 
 ## Remaining / To Add
 - Additional IO manager demos (S3/Parquet real integrations).

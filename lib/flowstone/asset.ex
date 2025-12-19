@@ -32,7 +32,10 @@ defmodule FlowStone.Asset do
     depends_on: [],
     optional_deps: [],
     route_error_policy: :fail,
-    requires: []
+    requires: [],
+    parallel_branches: %{},
+    parallel_options: %{},
+    join_fn: nil
   ]
 
   @type name :: atom()
@@ -56,6 +59,9 @@ defmodule FlowStone.Asset do
           scatter_fn: (map() -> [map()]) | nil,
           scatter_options: map() | nil,
           gather_fn: (map() -> term()) | nil,
+          parallel_branches: %{name() => FlowStone.ParallelBranch.t()} | map(),
+          parallel_options: map() | nil,
+          join_fn: (map() -> term()) | (map(), map() -> term()) | nil,
           on_signal_fn: (map(), map() -> {:ok, term()} | {:error, term()}) | nil,
           on_timeout_fn: (map() -> {:retry, keyword()} | {:error, term()}) | nil,
           metadata: map(),

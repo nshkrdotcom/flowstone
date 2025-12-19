@@ -38,6 +38,15 @@ defmodule FlowStone.Telemetry do
   - `[:flowstone, :route, :start]` - Routing evaluation started
   - `[:flowstone, :route, :stop]` - Routing decision recorded
   - `[:flowstone, :route, :error]` - Routing evaluation failed
+
+  ## Parallel Events
+
+  - `[:flowstone, :parallel, :start]` - Parallel execution started
+  - `[:flowstone, :parallel, :stop]` - Parallel execution completed
+  - `[:flowstone, :parallel, :error]` - Parallel execution failed
+  - `[:flowstone, :parallel, :branch_start]` - Branch execution enqueued
+  - `[:flowstone, :parallel, :branch_complete]` - Branch execution completed
+  - `[:flowstone, :parallel, :branch_fail]` - Branch execution failed
   """
 
   @events [
@@ -82,7 +91,14 @@ defmodule FlowStone.Telemetry do
     # Routing
     [:flowstone, :route, :start],
     [:flowstone, :route, :stop],
-    [:flowstone, :route, :error]
+    [:flowstone, :route, :error],
+    # Parallel
+    [:flowstone, :parallel, :start],
+    [:flowstone, :parallel, :stop],
+    [:flowstone, :parallel, :error],
+    [:flowstone, :parallel, :branch_start],
+    [:flowstone, :parallel, :branch_complete],
+    [:flowstone, :parallel, :branch_fail]
   ]
 
   def events, do: @events

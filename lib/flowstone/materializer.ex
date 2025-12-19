@@ -6,9 +6,12 @@ defmodule FlowStone.Materializer do
   alias FlowStone.{Error, ErrorRecorder, RouteDecisions}
 
   @spec execute(struct(), map(), map()) ::
-          {:ok, term()} | {:error, Error.t()} | {:skipped, term()}
+          {:ok, term()} | {:error, Error.t()} | {:skipped, term()} | {:parallel_pending, term()}
   def execute(asset, context, deps) do
     cond do
+      parallel_asset?(asset) ->
+        {:parallel_pending, :parallel}
+
       router_asset?(asset) ->
         execute_router(asset, context, deps)
 
@@ -351,6 +354,11 @@ defmodule FlowStone.Materializer do
 
   defp routed_asset?(asset) do
     not is_nil(Map.get(asset, :routed_from))
+  end
+
+  defp parallel_asset?(asset) do
+    branches = Map.get(asset, :parallel_branches, %{})
+    is_map(branches) and map_size(branches) > 0
   end
 
   defp emit_route_start(asset, context) do

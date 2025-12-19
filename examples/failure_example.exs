@@ -10,6 +10,8 @@ defmodule Examples.FailureExample do
 
     run_id = Ecto.UUID.generate()
 
+    IO.puts("Expected error: simulated failure (demo)")
+
     FlowStone.materialize(:flaky,
       partition: :will_fail,
       registry: :examples_failure_registry,

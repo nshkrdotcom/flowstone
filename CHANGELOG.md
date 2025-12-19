@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Routing telemetry events: `[:flowstone, :route, :start | :stop | :error]`
 - Example `conditional_routing_example.exs` and routing docs/README sections
 - Migration `0009_create_route_decisions.exs`
+- Parallel branches DSL: `parallel`, `branch`, `parallel_options`, `join`
+- Parallel persistence tables: `flowstone_parallel_executions`, `flowstone_parallel_branches`
+- Parallel join worker with durable coordination and IO-based joins
+- Parallel telemetry events: `[:flowstone, :parallel, :start | :stop | :error | :branch_start | :branch_complete | :branch_fail]`
+- Example `parallel_branches_example.exs` and updated docs/README sections
+- Migration `0010_create_parallel_tables.exs`
 
 ### Changed
 
@@ -21,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Executor/materializer/worker honor persisted routing decisions and skip IO writes when not selected
 - Optional dependencies resolve to `nil` and are ignored in dependency gating and lineage
 - DAG validation enforces routed_from router assets, optional_deps subset, and implicit router edges
+- Executor handles parallel pending results without storing IO; join worker records final materializations
+- DAG adds virtual edges from parallel assets to branch finals; lineage includes branch finals on join
 
 ## [0.3.0] - 2025-12-18
 

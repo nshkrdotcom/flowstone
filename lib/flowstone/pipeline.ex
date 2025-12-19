@@ -178,6 +178,67 @@ defmodule FlowStone.Pipeline do
   end
 
   @doc """
+  Define parallel branches for an asset.
+  """
+  defmacro parallel(do: block) do
+    quote do
+      var!(parallel_branches) = %{}
+      unquote(block)
+      var!(current_asset) = %{var!(current_asset) | parallel_branches: var!(parallel_branches)}
+    end
+  end
+
+  @doc """
+  Define a single parallel branch.
+  """
+  defmacro branch(name, opts \\ []) do
+    quote do
+      branch_name = unquote(name)
+      branch_opts = unquote(opts)
+      final_asset = Keyword.get(branch_opts, :final)
+
+      if is_nil(final_asset) do
+        raise ArgumentError,
+              "parallel branch #{inspect(branch_name)} must define :final asset"
+      end
+
+      if Map.has_key?(var!(parallel_branches), branch_name) do
+        raise ArgumentError,
+              "parallel branch name #{inspect(branch_name)} must be unique"
+      end
+
+      branch = %FlowStone.ParallelBranch{
+        name: branch_name,
+        final: final_asset,
+        required: Keyword.get(branch_opts, :required, true),
+        timeout: Keyword.get(branch_opts, :timeout)
+      }
+
+      var!(parallel_branches) = Map.put(var!(parallel_branches), branch_name, branch)
+    end
+  end
+
+  @doc """
+  Configure parallel execution options.
+  """
+  defmacro parallel_options(do: block) do
+    quote do
+      var!(parallel_opts) = %{}
+      unquote(block)
+      var!(current_asset) = %{var!(current_asset) | parallel_options: var!(parallel_opts)}
+    end
+  end
+
+  @doc """
+  Define a join function for parallel branches.
+  """
+  defmacro join(fun) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | join_fn: unquote(fun)}
+    end
+  end
+
+  @doc """
   Define a scatter function for dynamic fan-out.
 
   The scatter function receives upstream dependencies and returns
@@ -246,8 +307,22 @@ defmodule FlowStone.Pipeline do
   end
 
   defmacro failure_mode(value) do
-    quote do
-      var!(scatter_opts) = Map.put(var!(scatter_opts), :failure_mode, unquote(value))
+    env = __CALLER__
+
+    cond do
+      Macro.Env.has_var?(env, {:parallel_opts, nil}) ->
+        quote do
+          var!(parallel_opts) = Map.put(var!(parallel_opts), :failure_mode, unquote(value))
+        end
+
+      Macro.Env.has_var?(env, {:scatter_opts, nil}) ->
+        quote do
+          var!(scatter_opts) = Map.put(var!(scatter_opts), :failure_mode, unquote(value))
+        end
+
+      true ->
+        raise ArgumentError,
+              "failure_mode must be used inside scatter_options or parallel_options"
     end
   end
 
@@ -276,8 +351,21 @@ defmodule FlowStone.Pipeline do
   end
 
   defmacro timeout(value) do
-    quote do
-      var!(scatter_opts) = Map.put(var!(scatter_opts), :timeout, unquote(value))
+    env = __CALLER__
+
+    cond do
+      Macro.Env.has_var?(env, {:parallel_opts, nil}) ->
+        quote do
+          var!(parallel_opts) = Map.put(var!(parallel_opts), :timeout, unquote(value))
+        end
+
+      Macro.Env.has_var?(env, {:scatter_opts, nil}) ->
+        quote do
+          var!(scatter_opts) = Map.put(var!(scatter_opts), :timeout, unquote(value))
+        end
+
+      true ->
+        raise ArgumentError, "timeout must be used inside scatter_options or parallel_options"
     end
   end
 

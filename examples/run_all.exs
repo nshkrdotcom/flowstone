@@ -13,6 +13,7 @@ example_files = [
   "sensor_example.exs",
   "failure_example.exs",
   "conditional_routing_example.exs",
+  "parallel_branches_example.exs",
   # v0.3.0 - New features
   "scatter_example.exs",
   "signal_gate_example.exs",
@@ -38,7 +39,8 @@ examples = [
   {Examples.PostgresIOExample, "Postgres IO + composite partition"},
   {Examples.SensorExample, "Sensor trigger"},
   {Examples.FailureExample, "Failure & materialization recording"},
-  {Examples.ConditionalRoutingExample, "Conditional routing"}
+  {Examples.ConditionalRoutingExample, "Conditional routing"},
+  {Examples.ParallelBranchesExample, "Parallel branches"}
 ]
 
 Enum.each(examples, fn {mod, label} ->

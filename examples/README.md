@@ -34,6 +34,7 @@ This folder contains runnable examples that exercise core FlowStone features end
 - `sensor_example.exs` — sensor trigger using S3FileArrival with a mock list function.
 - `failure_example.exs` — failure path with materialization recording and error capture.
 - `conditional_routing_example.exs` — runtime branch selection with router assets.
+- `parallel_branches_example.exs` — parallel branches with join results.
 
 ## Advanced Examples (v0.3.0+)
 

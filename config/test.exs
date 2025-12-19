@@ -19,7 +19,7 @@ config :flowstone,
 config :flowstone, Oban,
   repo: FlowStone.Repo,
   testing: :inline,
-  queues: [assets: 10, checkpoints: 2],
+  queues: [assets: 10, checkpoints: 2, parallel_join: 5],
   plugins: []
 
 config :hammer,

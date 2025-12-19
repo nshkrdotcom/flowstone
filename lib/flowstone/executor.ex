@@ -3,7 +3,15 @@ defmodule FlowStone.Executor do
   Executes a single asset, loading dependencies and storing results via I/O managers.
   """
 
-  alias FlowStone.{AuditLogContext, Context, Error, Materializer, Registry, RouteDecisions}
+  alias FlowStone.{
+    AuditLogContext,
+    Context,
+    Error,
+    Materializer,
+    Parallel,
+    Registry,
+    RouteDecisions
+  }
 
   @spec materialize(atom(), keyword()) :: {:ok, term()} | {:error, Error.t()} | {:error, term()}
   def materialize(asset_name, opts) do
@@ -50,6 +58,32 @@ defmodule FlowStone.Executor do
           maybe_audit(asset.name, partition, run_id, use_repo)
           record_lineage(asset.name, partition, run_id, deps, lineage_server, use_repo)
           {:ok, result}
+
+        {:parallel_pending, _info} ->
+          case Parallel.start_execution(asset, context,
+                 registry: registry,
+                 io: io_opts,
+                 resource_server: resource_server,
+                 lineage_server: lineage_server,
+                 materialization_store: mat_store,
+                 use_repo: use_repo,
+                 run_id: run_id,
+                 partition: partition
+               ) do
+            {:ok, _execution} ->
+              {:ok, :parallel_pending}
+
+            {:error, %Error{} = err} ->
+              record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
+              telemetry_exception(asset.name, partition, run_id, err)
+              {:error, err}
+
+            {:error, reason} ->
+              err = Error.execution_error(asset.name, partition, wrap(reason), [])
+              record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
+              telemetry_exception(asset.name, partition, run_id, err)
+              {:error, err}
+          end
 
         {:skipped, _reason} ->
           duration = System.monotonic_time(:millisecond) - start_time
@@ -212,4 +246,8 @@ defmodule FlowStone.Executor do
       _ -> default_fn.()
     end
   end
+
+  defp wrap(reason) when is_binary(reason), do: %RuntimeError{message: reason}
+  defp wrap(reason) when is_atom(reason), do: %RuntimeError{message: Atom.to_string(reason)}
+  defp wrap(reason), do: %RuntimeError{message: inspect(reason)}
 end

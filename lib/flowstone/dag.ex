@@ -15,13 +15,16 @@ defmodule FlowStone.DAG do
     nodes = Map.new(assets, &{&1.name, &1})
 
     with :ok <- validate_optional_deps(assets),
-         :ok <- validate_routed_assets(assets, nodes) do
+         :ok <- validate_routed_assets(assets, nodes),
+         :ok <- validate_parallel_branches(assets, nodes) do
       edges =
         Map.new(assets, fn asset ->
           deps = asset.depends_on || []
           deps = maybe_add_router_dep(asset, deps)
           {asset.name, deps}
         end)
+
+      edges = add_parallel_edges(assets, edges)
 
       with :ok <- detect_cycle(edges) do
         {:ok, %{nodes: nodes, edges: edges}}
@@ -123,5 +126,61 @@ defmodule FlowStone.DAG do
       nil -> deps
       router -> Enum.uniq([router | deps])
     end
+  end
+
+  defp validate_parallel_branches(assets, nodes) do
+    Enum.reduce_while(assets, :ok, fn asset, :ok ->
+      branches = Map.get(asset, :parallel_branches, %{})
+
+      case validate_branch_set(asset, branches, nodes) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_branch_set(asset, branches, nodes) when is_map(branches) do
+    if map_size(branches) > 0 do
+      Enum.reduce_while(branches, :ok, fn {branch_name, branch}, :ok ->
+        validate_branch(asset, branch_name, branch, nodes)
+      end)
+    else
+      :ok
+    end
+  end
+
+  defp validate_branch_set(_asset, _branches, _nodes), do: :ok
+
+  defp validate_branch(asset, branch_name, branch, nodes) do
+    cond do
+      is_nil(branch.final) ->
+        {:halt,
+         {:error,
+          {:invalid,
+           "parallel branch #{inspect(branch_name)} missing final asset for #{inspect(asset.name)}"}}}
+
+      not Map.has_key?(nodes, branch.final) ->
+        {:halt,
+         {:error,
+          {:invalid,
+           "parallel branch #{inspect(branch_name)} references missing asset #{inspect(branch.final)}"}}}
+
+      true ->
+        {:cont, :ok}
+    end
+  end
+
+  defp add_parallel_edges(assets, edges) do
+    Enum.reduce(assets, edges, fn asset, acc ->
+      branches = Map.get(asset, :parallel_branches, %{})
+
+      Enum.reduce(branches, acc, fn {_branch_name, branch}, inner_acc ->
+        final = branch.final
+
+        Map.update(inner_acc, final, [asset.name], fn deps ->
+          Enum.uniq([asset.name | deps])
+        end)
+      end)
+    end)
   end
 end

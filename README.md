@@ -313,6 +313,33 @@ asset :merge do
 end
 ```
 
+### Parallel Branches
+
+Run heterogeneous branches in parallel and join results:
+
+```elixir
+asset :enrich do
+  depends_on [:input]
+
+  parallel do
+    branch :maps, final: :generate_maps
+    branch :news, final: :get_front_pages
+  end
+
+  parallel_options do
+    failure_mode :partial
+  end
+
+  join fn branches, deps ->
+    %{
+      maps: branches.maps,
+      news: branches.news,
+      input: deps.input
+    }
+  end
+end
+```
+
 ### Rate Limiting
 
 Distributed rate limiting for APIs and external services:
@@ -338,6 +365,7 @@ FlowStone emits telemetry events for observability:
 - `[:flowstone, :scatter, :start | :complete | :failed | :instance_complete | :instance_fail]`
 - `[:flowstone, :signal_gate, :create | :signal | :timeout]`
 - `[:flowstone, :route, :start | :stop | :error]`
+- `[:flowstone, :parallel, :start | :stop | :error | :branch_start | :branch_complete | :branch_fail]`
 - `[:flowstone, :rate_limit, :check | :wait | :slot_acquired | :slot_released]`
 
 ## Documentation

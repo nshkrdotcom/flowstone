@@ -66,12 +66,13 @@ end
 ### 3.1 Branch Options
 
 - `final:` (required) - terminal asset for the branch
-- `required:` (optional, default true) - must succeed for join
+- `required:` (optional, default true) - branch must complete before join
 - `timeout:` (optional) - per-branch timeout
 
 ### 3.2 Join Function
 
-`join/1` or `join/2` receives a map of branch results.
+`join/1` or `join/2` receives a map of branch results. If no join is provided,
+the default is an identity join that returns the branch map.
 
 For `failure_mode :all_or_nothing`:
 
@@ -99,8 +100,9 @@ Branch completion is derived from materialization status:
 
 ### 4.2 Failure Handling
 
-- `failure_mode :all_or_nothing` fails on any failed required branch.
-- `failure_mode :partial` allows join when all required branches are successful.
+- `failure_mode :all_or_nothing` fails when any branch does not succeed.
+- `failure_mode :partial` joins once required branches reach terminal status.
+  Optional branches that remain pending are treated as `:skipped` in the join map.
 
 ## 5. Asset Struct Changes
 
@@ -137,6 +139,8 @@ create table(:flowstone_parallel_executions, primary_key: false) do
   add :metadata, :map, default: %{}
   timestamps(type: :utc_datetime_usec)
 end
+
+create unique_index(:flowstone_parallel_executions, [:run_id, :parent_asset, :partition])
 
 create table(:flowstone_parallel_branches, primary_key: false) do
   add :id, :uuid, primary_key: true
@@ -239,4 +243,3 @@ When `compatibility_mode: :step_functions` is enabled, defaults are:
 - Integration tests for partial failure and required branches.
 - Tests for join behavior with skipped branches.
 - Nested parallel and scatter combinations.
-
