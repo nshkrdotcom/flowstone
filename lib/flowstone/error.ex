@@ -108,6 +108,50 @@ defmodule FlowStone.Error do
   end
 
   @doc """
+  Create an error for when an asset is not found, with suggestions.
+  """
+  def asset_not_found_with_suggestion(pipeline, asset_name, available) do
+    suggestion = suggest_similar(asset_name, available)
+
+    message =
+      if suggestion do
+        "Asset #{inspect(asset_name)} not found in #{inspect(pipeline)}. Available: #{inspect(available)}. Did you mean: #{inspect(suggestion)}?"
+      else
+        "Asset #{inspect(asset_name)} not found in #{inspect(pipeline)}. Available: #{inspect(available)}"
+      end
+
+    %__MODULE__{
+      type: :asset_not_found,
+      message: message,
+      context: %{
+        asset: asset_name,
+        pipeline: pipeline,
+        available: available,
+        suggestion: suggestion
+      },
+      retryable: false,
+      original: nil
+    }
+  end
+
+  defp suggest_similar(target, candidates) do
+    target_str = to_string(target)
+
+    candidates
+    |> Enum.map(fn candidate ->
+      candidate_str = to_string(candidate)
+      {candidate, String.jaro_distance(target_str, candidate_str)}
+    end)
+    |> Enum.filter(fn {_, score} -> score > 0.7 end)
+    |> Enum.sort_by(fn {_, score} -> score end, :desc)
+    |> List.first()
+    |> case do
+      {candidate, _score} -> candidate
+      nil -> nil
+    end
+  end
+
+  @doc """
   Create an error for I/O operations.
   """
   def io_error(operation, asset, partition, reason) do

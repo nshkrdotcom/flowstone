@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-12-18
+
+### Added
+
+#### New Simplified API
+- `FlowStone.run/2-3` - Run an asset with automatic dependency resolution
+- `FlowStone.get/2-3` - Retrieve cached asset results
+- `FlowStone.exists?/2-3` - Check if an asset result exists
+- `FlowStone.invalidate/2-3` - Remove cached results
+- `FlowStone.status/2-3` - Get asset execution status
+- `FlowStone.backfill/3` - Process multiple partitions efficiently
+- `FlowStone.graph/1-2` - Get DAG visualization (ASCII, Mermaid)
+- `FlowStone.assets/1` - List all assets in a pipeline
+- `FlowStone.asset_info/2` - Get detailed asset information
+
+#### Configuration System
+- `FlowStone.Config` - Centralized configuration with sensible defaults
+- Auto-detection: Postgres storage when repo is configured
+- Zero-config mode: Works with in-memory storage by default
+
+#### DSL Improvements
+- Short-form assets: `asset :name, do: {:ok, value}`
+- Implicit result wrapping with `use FlowStone.Pipeline, wrap_results: true`
+- Pipeline module injection: `MyPipeline.run(:asset)`, `MyPipeline.get(:asset)`
+- Auto-generated `assets/0`, `graph/0`, `exists?/1` on pipeline modules
+
+#### Test Helpers
+- `FlowStone.Test` - Test module with isolation per test
+- `run_asset/3` - Run assets with mocked dependencies
+- `assert_asset_exists/3` and `refute_asset_exists/3` helpers
+
+#### Error Improvements
+- `FlowStone.Error.asset_not_found_with_suggestion/3` - Suggests similar asset names
+- Structured errors with `type`, `message`, and `context` fields
+
+### Changed
+- Pipelines are now auto-registered on first use when using `FlowStone.run/3`
+- Materializer supports `wrap_results` option for implicit `{:ok, _}` wrapping
+
+### Notes
+- Both the new simplified API (`run/3`, `get/3`, `backfill/3`) and the existing API
+  (`materialize/2`, `register/2`) are fully supported
+- The new API is recommended for new code; existing code continues to work unchanged
+
 ## [0.4.0] - 2025-12-18
 
 ### Added
@@ -134,6 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Initial Release
 
+[0.5.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.1.0...v0.2.0

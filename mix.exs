@@ -1,7 +1,7 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
@@ -132,6 +132,11 @@ defmodule FlowStone.MixProject do
         {"README.md", [filename: "readme"]},
         "CHANGELOG.md",
         "LICENSE",
+        # Guides
+        {"guides/getting-started.md", [filename: "getting-started", title: "Getting Started"]},
+        {"guides/configuration.md", [filename: "configuration", title: "Configuration"]},
+        {"guides/testing.md", [filename: "testing", title: "Testing"]},
+        # Design docs
         "docs/design/OVERVIEW.md",
         {"docs/adr/README.md", [filename: "adr-overview"]},
         "docs/adr/0001-asset-first-orchestration.md",
@@ -152,12 +157,21 @@ defmodule FlowStone.MixProject do
         "docs/adr/0016-runtime-serialization-boundaries.md"
       ],
       groups_for_extras: [
+        Guides: [
+          "guides/getting-started.md",
+          "guides/configuration.md",
+          "guides/testing.md"
+        ],
         "Architecture Decision Records": Path.wildcard("docs/adr/*.md"),
         Design: ["docs/design/OVERVIEW.md"]
       ],
       groups_for_modules: [
-        Core: [
+        "High-Level API": [
           FlowStone,
+          FlowStone.API,
+          FlowStone.Config
+        ],
+        Core: [
           FlowStone.Asset,
           FlowStone.Pipeline,
           FlowStone.Context,
@@ -225,9 +239,11 @@ defmodule FlowStone.MixProject do
         ],
         Errors: [
           FlowStone.Error,
-          FlowStone.Error.Formatter
+          FlowStone.ConfigError
         ],
         Testing: [
+          FlowStone.Test,
+          FlowStone.TestCase,
           FlowStone.AssetCase,
           FlowStone.Test.Fixtures
         ]

@@ -51,21 +51,78 @@ defmodule FlowStone.Pipeline do
       end
   """
 
-  defmacro __using__(_opts) do
+  defmacro __using__(opts) do
+    wrap_results = Keyword.get(opts, :wrap_results, false)
+
     quote do
       import FlowStone.Pipeline
       Module.register_attribute(__MODULE__, :flowstone_assets, accumulate: true)
+      Module.put_attribute(__MODULE__, :flowstone_wrap_results, unquote(wrap_results))
       @after_compile FlowStone.Pipeline
       @before_compile FlowStone.Pipeline
     end
   end
 
   defmacro __before_compile__(_env) do
+    [
+      inject_metadata_functions(),
+      inject_run_functions(),
+      inject_get_functions(),
+      inject_exists_functions(),
+      inject_introspection_functions()
+    ]
+  end
+
+  defp inject_metadata_functions do
     quote do
       @doc false
-      def __flowstone_assets__ do
-        :persistent_term.get({__MODULE__, :flowstone_assets}, [])
-      end
+      def __flowstone_assets__, do: :persistent_term.get({__MODULE__, :flowstone_assets}, [])
+
+      @doc false
+      def __flowstone_wrap_results__, do: @flowstone_wrap_results
+    end
+  end
+
+  defp inject_run_functions do
+    quote do
+      @doc "Run an asset in this pipeline"
+      def run(asset_name), do: FlowStone.API.run(__MODULE__, asset_name)
+
+      @doc "Run an asset with options"
+      def run(asset_name, opts), do: FlowStone.API.run(__MODULE__, asset_name, opts)
+    end
+  end
+
+  defp inject_get_functions do
+    quote do
+      @doc "Get the cached result of an asset"
+      def get(asset_name), do: FlowStone.API.get(__MODULE__, asset_name)
+
+      @doc "Get the cached result with options"
+      def get(asset_name, opts), do: FlowStone.API.get(__MODULE__, asset_name, opts)
+    end
+  end
+
+  defp inject_exists_functions do
+    quote do
+      @doc "Check if an asset result exists"
+      def exists?(asset_name), do: FlowStone.API.exists?(__MODULE__, asset_name)
+
+      @doc "Check if an asset result exists with options"
+      def exists?(asset_name, opts), do: FlowStone.API.exists?(__MODULE__, asset_name, opts)
+    end
+  end
+
+  defp inject_introspection_functions do
+    quote do
+      @doc "List all assets in this pipeline"
+      def assets, do: FlowStone.API.assets(__MODULE__)
+
+      @doc "Get the pipeline graph"
+      def graph, do: FlowStone.API.graph(__MODULE__)
+
+      @doc "Get the pipeline graph with options"
+      def graph(opts), do: FlowStone.API.graph(__MODULE__, opts)
     end
   end
 
@@ -79,18 +136,96 @@ defmodule FlowStone.Pipeline do
     :persistent_term.put({env.module, :flowstone_assets}, assets)
   end
 
+  @doc """
+  Define an asset in the pipeline.
+
+  ## Long Form
+
+      asset :name do
+        depends_on [:other]
+        execute fn ctx, deps -> {:ok, result} end
+      end
+
+  ## Short Form
+
+      asset :name, do: {:ok, "value"}
+      asset :name, do: fn _, _ -> {:ok, "computed"} end
+
+  The short form automatically creates an execute function from the value.
+  """
   defmacro asset(name, do: block) do
-    quote do
-      var!(current_asset) = %FlowStone.Asset{
-        name: unquote(name),
-        module: __MODULE__,
-        line: unquote(__CALLER__.line)
-      }
+    # Check if block is a simple expression (short form) or a do-block (long form)
+    if short_form?(block) do
+      # Short form: the block IS the execute value/function
+      quote do
+        var!(current_asset) = %FlowStone.Asset{
+          name: unquote(name),
+          module: __MODULE__,
+          line: unquote(__CALLER__.line),
+          execute_fn: FlowStone.Pipeline.__wrap_short_form__(unquote(block))
+        }
 
-      unquote(block)
+        @flowstone_assets var!(current_asset)
+      end
+    else
+      # Long form: the block contains DSL calls
+      quote do
+        var!(current_asset) = %FlowStone.Asset{
+          name: unquote(name),
+          module: __MODULE__,
+          line: unquote(__CALLER__.line)
+        }
 
-      @flowstone_assets var!(current_asset)
+        unquote(block)
+
+        @flowstone_assets var!(current_asset)
+      end
     end
+  end
+
+  # Check if the block is a short-form value (tuple, function, etc.)
+  # vs a long-form block with DSL calls
+  defp short_form?(block) do
+    case block do
+      # Block of statements (long form)
+      {:__block__, _, _} ->
+        false
+
+      # DSL calls like depends_on, execute, etc.
+      {call, _, _}
+      when call in [
+             :depends_on,
+             :execute,
+             :description,
+             :partition,
+             :partitioned_by,
+             :scatter,
+             :scatter_from,
+             :scatter_options,
+             :gather,
+             :route,
+             :routed_from,
+             :parallel,
+             :join,
+             :on_signal,
+             :on_timeout,
+             :optional_deps,
+             :batch_options
+           ] ->
+        false
+
+      # Everything else is short form
+      _ ->
+        true
+    end
+  end
+
+  @doc false
+  def __wrap_short_form__(value) when is_function(value, 2), do: value
+
+  def __wrap_short_form__(value) do
+    # Wrap non-function values as a constant execute function
+    fn _, _ -> value end
   end
 
   defmacro description(text) do

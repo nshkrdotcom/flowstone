@@ -105,60 +105,11 @@ defmodule FlowStone.Materializer do
 
   defp execute_normal(asset, context, deps) do
     execute_fn = Map.fetch!(asset, :execute_fn)
+    wrap_results? = should_wrap_results?(asset)
 
     try do
-      case execute_fn.(context, deps) do
-        {:ok, value} ->
-          {:ok, value}
-
-        {:wait_for_approval, approval_attrs} ->
-          FlowStone.Approvals.request(asset.name, approval_attrs, use_repo: true)
-
-          FlowStone.Materializations.record_waiting_approval(
-            asset.name,
-            context.partition,
-            context.run_id
-          )
-
-          {:error,
-           FlowStone.Error.execution_error(
-             asset.name,
-             context.partition,
-             wrap(:waiting_approval),
-             []
-           )}
-
-        {:error, %Error{} = err} ->
-          ErrorRecorder.record(err, %{
-            asset: asset.name,
-            partition: context.partition,
-            run_id: context.run_id
-          })
-
-          {:error, err}
-
-        {:error, reason} ->
-          err = Error.execution_error(asset.name, context.partition, wrap(reason), [])
-
-          ErrorRecorder.record(err, %{
-            asset: asset.name,
-            partition: context.partition,
-            run_id: context.run_id
-          })
-
-          {:error, err}
-
-        other ->
-          err = Error.unexpected_return(asset.name, context.partition, other)
-
-          ErrorRecorder.record(err, %{
-            asset: asset.name,
-            partition: context.partition,
-            run_id: context.run_id
-          })
-
-          {:error, err}
-      end
+      result = execute_fn.(context, deps)
+      handle_execute_result(result, asset, context, wrap_results?)
     rescue
       exception ->
         err = Error.execution_error(asset.name, context.partition, exception, __STACKTRACE__)
@@ -187,6 +138,77 @@ defmodule FlowStone.Materializer do
         })
 
         {:error, err}
+    end
+  end
+
+  defp handle_execute_result({:ok, value}, _asset, _context, _wrap?), do: {:ok, value}
+
+  defp handle_execute_result({:wait_for_approval, approval_attrs}, asset, context, _wrap?) do
+    FlowStone.Approvals.request(asset.name, approval_attrs, use_repo: true)
+
+    FlowStone.Materializations.record_waiting_approval(
+      asset.name,
+      context.partition,
+      context.run_id
+    )
+
+    {:error,
+     FlowStone.Error.execution_error(
+       asset.name,
+       context.partition,
+       wrap(:waiting_approval),
+       []
+     )}
+  end
+
+  defp handle_execute_result({:error, %Error{} = err}, asset, context, _wrap?) do
+    ErrorRecorder.record(err, %{
+      asset: asset.name,
+      partition: context.partition,
+      run_id: context.run_id
+    })
+
+    {:error, err}
+  end
+
+  defp handle_execute_result({:error, reason}, asset, context, _wrap?) do
+    err = Error.execution_error(asset.name, context.partition, wrap(reason), [])
+
+    ErrorRecorder.record(err, %{
+      asset: asset.name,
+      partition: context.partition,
+      run_id: context.run_id
+    })
+
+    {:error, err}
+  end
+
+  # When wrap_results is enabled, wrap non-tuple values in {:ok, _}
+  defp handle_execute_result(other, _asset, _context, true) do
+    {:ok, other}
+  end
+
+  # When wrap_results is disabled, non-tuple values are errors
+  defp handle_execute_result(other, asset, context, false) do
+    err = Error.unexpected_return(asset.name, context.partition, other)
+
+    ErrorRecorder.record(err, %{
+      asset: asset.name,
+      partition: context.partition,
+      run_id: context.run_id
+    })
+
+    {:error, err}
+  end
+
+  # Check if the asset's module has wrap_results enabled
+  defp should_wrap_results?(asset) do
+    module = Map.get(asset, :module)
+
+    if module && function_exported?(module, :__flowstone_wrap_results__, 0) do
+      module.__flowstone_wrap_results__()
+    else
+      false
     end
   end
 
