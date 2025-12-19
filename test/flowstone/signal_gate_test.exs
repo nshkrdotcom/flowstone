@@ -1,9 +1,9 @@
 defmodule FlowStone.SignalGateTest do
   use FlowStone.TestCase, isolation: :full_isolation
 
+  alias FlowStone.{Materialization, Repo}
   alias FlowStone.SignalGate
   alias FlowStone.SignalGate.{Gate, Token}
-  alias FlowStone.{Materialization, Repo}
 
   setup do
     # Create a materialization for testing

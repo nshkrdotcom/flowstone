@@ -32,6 +32,7 @@ defmodule FlowStone.SignalGate do
   import Ecto.Query
   alias FlowStone.Repo
   alias FlowStone.SignalGate.{Gate, Token}
+  alias FlowStone.Workers.SignalGateTimeoutWorker
 
   @type gate :: Gate.t()
 
@@ -255,7 +256,7 @@ defmodule FlowStone.SignalGate do
 
     if delay > 0 do
       %{gate_id: gate.id}
-      |> FlowStone.Workers.SignalGateTimeoutWorker.new(schedule_in: max(delay, 1))
+      |> SignalGateTimeoutWorker.new(schedule_in: max(delay, 1))
       |> Oban.insert()
     end
 

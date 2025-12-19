@@ -36,7 +36,7 @@ defmodule FlowStone.Scatter do
   """
 
   import Ecto.Query
-  alias FlowStone.{Repo, Partition}
+  alias FlowStone.{Partition, Repo}
   alias FlowStone.Scatter.{Barrier, Key, Options, Result}
 
   @type scatter_key :: Key.t()
