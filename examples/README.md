@@ -60,6 +60,17 @@ Demonstrates ItemReader support for Scatter:
 MIX_ENV=dev mix run examples/item_reader_example.exs
 ```
 
+### `item_batcher_example.exs` — Batch Scatter Execution
+Demonstrates ItemBatcher for grouping scatter items into batches:
+- Fixed-size batching with `max_items_per_batch`
+- Shared batch context via `batch_input`
+- Batch execution with `batch_items`, `batch_index`, `batch_count`
+- Gather receives batch results (not per-item results)
+
+```bash
+MIX_ENV=dev mix run examples/item_batcher_example.exs
+```
+
 ### `signal_gate_example.exs` — Durable External Suspension
 Demonstrates FlowStone's Signal Gate feature for external task integration:
 - Zero-resource suspension while waiting for callbacks

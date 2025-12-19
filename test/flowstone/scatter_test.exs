@@ -332,4 +332,123 @@ defmodule FlowStone.ScatterTest do
       assert status.failed == 0
     end
   end
+
+  describe "Scatter with batching" do
+    import Ecto.Query
+    alias FlowStone.Scatter.BatchOptions
+
+    test "create_barrier with batching enabled stores batch metadata" do
+      run_id = Ecto.UUID.generate()
+      scatter_keys = [%{id: 1}, %{id: 2}, %{id: 3}, %{id: 4}, %{id: 5}]
+      batch_opts = BatchOptions.new(max_items_per_batch: 2)
+
+      {:ok, barrier} =
+        Scatter.create_barrier(
+          run_id: run_id,
+          asset_name: :batched_scatter,
+          scatter_keys: scatter_keys,
+          batch_options: batch_opts
+        )
+
+      assert barrier.batching_enabled == true
+      assert barrier.batch_count == 3
+    end
+
+    test "batched scatter creates batch result records" do
+      run_id = Ecto.UUID.generate()
+      scatter_keys = [%{id: 1}, %{id: 2}, %{id: 3}, %{id: 4}]
+      batch_opts = BatchOptions.new(max_items_per_batch: 2)
+      batch_input = %{env: "test"}
+
+      {:ok, barrier} =
+        Scatter.create_barrier(
+          run_id: run_id,
+          asset_name: :batched_scatter,
+          scatter_keys: scatter_keys,
+          batch_options: batch_opts,
+          batch_input: batch_input
+        )
+
+      # Should have 2 batch records (4 items / 2 per batch)
+      results =
+        FlowStone.Repo.all(
+          from r in Result,
+            where: r.barrier_id == ^barrier.id,
+            order_by: [asc: r.scatter_index]
+        )
+
+      assert length(results) == 2
+
+      # Each result should have batch metadata
+      Enum.each(results, fn result ->
+        assert result.batch_index != nil
+        assert is_list(result.batch_items)
+        assert result.batch_input == %{"env" => "test"}
+      end)
+    end
+
+    test "complete/3 works with batch keys" do
+      run_id = Ecto.UUID.generate()
+      scatter_keys = [%{id: 1}, %{id: 2}]
+      batch_opts = BatchOptions.new(max_items_per_batch: 2)
+
+      {:ok, barrier} =
+        Scatter.create_barrier(
+          run_id: run_id,
+          asset_name: :batched_scatter,
+          scatter_keys: scatter_keys,
+          batch_options: batch_opts
+        )
+
+      # Get the batch key
+      [result] =
+        FlowStone.Repo.all(
+          from r in Result,
+            where: r.barrier_id == ^barrier.id
+        )
+
+      batch_key = result.scatter_key
+
+      {:ok, status} = Scatter.complete(barrier.id, batch_key, %{processed: 2})
+
+      assert status == :gather
+
+      {:ok, updated} = Scatter.get_barrier(barrier.id)
+      assert updated.completed_count == 1
+      assert updated.status == :completed
+    end
+
+    test "gather/1 returns batch results" do
+      run_id = Ecto.UUID.generate()
+      scatter_keys = [%{id: 1}, %{id: 2}, %{id: 3}, %{id: 4}]
+      batch_opts = BatchOptions.new(max_items_per_batch: 2)
+
+      {:ok, barrier} =
+        Scatter.create_barrier(
+          run_id: run_id,
+          asset_name: :batched_scatter,
+          scatter_keys: scatter_keys,
+          batch_options: batch_opts
+        )
+
+      # Complete all batches
+      results =
+        FlowStone.Repo.all(
+          from r in Result,
+            where: r.barrier_id == ^barrier.id
+        )
+
+      Enum.each(results, fn result ->
+        Scatter.complete(barrier.id, result.scatter_key, %{
+          batch_index: result.batch_index,
+          processed: length(result.batch_items)
+        })
+      end)
+
+      {:ok, gathered} = Scatter.gather(barrier.id)
+
+      # Should have batch results, not per-item results
+      assert map_size(gathered) == 2
+    end
+  end
 end

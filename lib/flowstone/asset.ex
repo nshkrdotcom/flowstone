@@ -28,6 +28,8 @@ defmodule FlowStone.Asset do
     :item_selector_fn,
     :scatter_mode,
     :gather_fn,
+    # Batch support
+    :batch_options,
     # Signal Gate support
     :on_signal_fn,
     :on_timeout_fn,
@@ -67,6 +69,7 @@ defmodule FlowStone.Asset do
           item_selector_fn: (map(), map() -> map()) | nil,
           scatter_mode: :inline | :distributed | nil,
           gather_fn: (map() -> term()) | nil,
+          batch_options: map() | nil,
           parallel_branches: %{name() => FlowStone.ParallelBranch.t()} | map(),
           parallel_options: map() | nil,
           join_fn: (map() -> term()) | (map(), map() -> term()) | nil,

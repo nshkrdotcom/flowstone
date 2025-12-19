@@ -1,6 +1,20 @@
 defmodule FlowStone.Context do
   @moduledoc """
   Execution context passed to asset functions.
+
+  ## Scatter Context
+
+  When executing a scattered instance, the context includes:
+  - `scatter_key` - The key identifying this scatter instance
+
+  ## Batch Context
+
+  When executing a batched scatter instance, the context includes:
+  - `scatter_key` - Batch metadata: `%{"_batch" => true, "index" => N, "item_count" => M}`
+  - `batch_index` - Zero-based index of this batch
+  - `batch_count` - Total number of batches
+  - `batch_items` - List of items in this batch
+  - `batch_input` - Shared batch input (evaluated once at scatter start)
   """
 
   defstruct [
@@ -9,7 +23,14 @@ defmodule FlowStone.Context do
     :run_id,
     :resources,
     :metadata,
-    :started_at
+    :started_at,
+    # Scatter fields
+    :scatter_key,
+    # Batch fields
+    :batch_index,
+    :batch_count,
+    :batch_items,
+    :batch_input
   ]
 
   @doc """

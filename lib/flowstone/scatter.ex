@@ -37,7 +37,7 @@ defmodule FlowStone.Scatter do
 
   import Ecto.Query
   alias FlowStone.{Error, Partition, Repo}
-  alias FlowStone.Scatter.{Barrier, ItemReader, Key, Options, Result}
+  alias FlowStone.Scatter.{Barrier, Batcher, BatchOptions, ItemReader, Key, Options, Result}
   alias FlowStone.Workers.{ItemReaderWorker, ScatterWorker}
 
   @type scatter_key :: Key.t()
@@ -54,12 +54,23 @@ defmodule FlowStone.Scatter do
   - `:scatter_keys` - List of scatter keys from scatter function (required)
   - `:scatter_source_asset` - Asset that provided the scatter data (optional)
   - `:options` - ScatterOptions struct (optional)
+  - `:batch_options` - BatchOptions struct (optional, enables batching)
+  - `:batch_input` - Shared batch input (optional, evaluated value)
   - `:metadata` - Additional metadata (optional)
   """
   @spec create_barrier(keyword()) :: {:ok, barrier()} | {:error, term()}
   def create_barrier(opts) do
     scatter_keys = Keyword.fetch!(opts, :scatter_keys)
+    batch_opts = Keyword.get(opts, :batch_options)
 
+    if batch_opts do
+      create_batched_barrier(scatter_keys, batch_opts, opts)
+    else
+      create_standard_barrier(scatter_keys, opts)
+    end
+  end
+
+  defp create_standard_barrier(scatter_keys, opts) do
     with {:ok, barrier} <- start_barrier(Keyword.put(opts, :emit_start, false)),
          {:ok, _count} <- insert_results(barrier.id, scatter_keys) do
       updated = Repo.get!(Barrier, barrier.id)
@@ -67,6 +78,33 @@ defmodule FlowStone.Scatter do
       {:ok, updated}
     end
   end
+
+  defp create_batched_barrier(scatter_keys, batch_opts, opts) do
+    batch_opts = normalize_batch_options(batch_opts)
+    batches = Batcher.batch(scatter_keys, batch_opts)
+    batch_count = length(batches)
+    batch_input = Keyword.get(opts, :batch_input)
+
+    barrier_opts =
+      opts
+      |> Keyword.put(:emit_start, false)
+      |> Keyword.put(:batching_enabled, true)
+      |> Keyword.put(:batch_count, batch_count)
+      |> Keyword.put(:batch_options_map, BatchOptions.to_map(batch_opts))
+
+    with {:ok, barrier} <- start_barrier(barrier_opts),
+         {:ok, _count} <- insert_batch_results(barrier.id, batches, batch_input) do
+      updated = Repo.get!(Barrier, barrier.id)
+      emit_telemetry(:start, updated)
+      emit_batch_telemetry(:batch_create, updated, batch_count)
+      {:ok, updated}
+    end
+  end
+
+  defp normalize_batch_options(%BatchOptions{} = opts), do: opts
+  defp normalize_batch_options(nil), do: BatchOptions.new()
+  defp normalize_batch_options(opts) when is_list(opts), do: BatchOptions.new(opts)
+  defp normalize_batch_options(opts) when is_map(opts), do: BatchOptions.new(Map.to_list(opts))
 
   @doc """
   Create a barrier with zero items for streaming readers.
@@ -96,7 +134,11 @@ defmodule FlowStone.Scatter do
       mode: Keyword.get(opts, :mode, scatter_opts.mode),
       reader_checkpoint: Keyword.get(opts, :reader_checkpoint),
       parent_barrier_id: Keyword.get(opts, :parent_barrier_id),
-      batch_index: Keyword.get(opts, :batch_index)
+      batch_index: Keyword.get(opts, :batch_index),
+      # Batch fields
+      batching_enabled: Keyword.get(opts, :batching_enabled, false),
+      batch_count: Keyword.get(opts, :batch_count),
+      batch_options: Keyword.get(opts, :batch_options_map)
     }
 
     emit_start? = Keyword.get(opts, :emit_start, true)
@@ -169,6 +211,66 @@ defmodule FlowStone.Scatter do
 
       inserted_count
     end)
+  end
+
+  @doc """
+  Insert batch result records for a barrier.
+
+  Each batch becomes a single result record with batch metadata.
+  """
+  @spec insert_batch_results(Ecto.UUID.t(), [[map()]], map() | nil) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def insert_batch_results(barrier_id, batches, batch_input) do
+    Repo.transaction(fn ->
+      # Lock the barrier to ensure consistent updates
+      _barrier = Repo.get!(Barrier, barrier_id, lock: "FOR UPDATE")
+      now = DateTime.utc_now()
+      normalized_input = normalize_batch_input_for_storage(batch_input)
+
+      result_records =
+        batches
+        |> Enum.with_index()
+        |> Enum.map(fn {batch_items, batch_index} ->
+          batch_key = Batcher.batch_scatter_key(batch_index, length(batch_items))
+          normalized_items = Enum.map(batch_items, &Key.normalize/1)
+
+          %{
+            id: Ecto.UUID.generate(),
+            barrier_id: barrier_id,
+            scatter_key_hash: Key.hash(batch_key),
+            scatter_key: batch_key,
+            scatter_index: batch_index,
+            status: :pending,
+            batch_index: batch_index,
+            batch_items: normalized_items,
+            batch_input: normalized_input,
+            inserted_at: now,
+            updated_at: now
+          }
+        end)
+
+      {inserted_count, _} =
+        Repo.insert_all(Result, result_records,
+          on_conflict: :nothing,
+          conflict_target: [:barrier_id, :scatter_key_hash]
+        )
+
+      from(b in Barrier, where: b.id == ^barrier_id)
+      |> Repo.update_all(inc: [total_count: inserted_count], set: [updated_at: now])
+
+      inserted_count
+    end)
+  end
+
+  defp normalize_batch_input_for_storage(nil), do: nil
+
+  defp normalize_batch_input_for_storage(input) when is_map(input) do
+    input
+    |> Enum.map(fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      kv -> kv
+    end)
+    |> Map.new()
   end
 
   @doc """
@@ -1040,5 +1142,17 @@ defmodule FlowStone.Scatter do
       end
 
     :telemetry.execute([:flowstone, :scatter, event], measurements, meta)
+  end
+
+  defp emit_batch_telemetry(event, barrier, batch_count) do
+    :telemetry.execute(
+      [:flowstone, :scatter, event],
+      %{batch_count: batch_count},
+      %{
+        barrier_id: barrier.id,
+        asset: barrier.asset_name,
+        run_id: barrier.run_id
+      }
+    )
   end
 end

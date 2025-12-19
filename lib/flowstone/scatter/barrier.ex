@@ -34,6 +34,10 @@ defmodule FlowStone.Scatter.Barrier do
     field :batch_index, :integer
     field :options, :map, default: %{}
     field :metadata, :map, default: %{}
+    # Batch fields
+    field :batching_enabled, :boolean, default: false
+    field :batch_count, :integer
+    field :batch_options, :map
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -55,6 +59,9 @@ defmodule FlowStone.Scatter.Barrier do
           batch_index: non_neg_integer() | nil,
           options: map(),
           metadata: map(),
+          batching_enabled: boolean(),
+          batch_count: non_neg_integer() | nil,
+          batch_options: map() | nil,
           inserted_at: DateTime.t(),
           updated_at: DateTime.t()
         }
@@ -72,7 +79,10 @@ defmodule FlowStone.Scatter.Barrier do
     :parent_barrier_id,
     :batch_index,
     :options,
-    :metadata
+    :metadata,
+    :batching_enabled,
+    :batch_count,
+    :batch_options
   ]
 
   @doc """

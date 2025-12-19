@@ -18,7 +18,9 @@ example_files = [
   "scatter_example.exs",
   "item_reader_example.exs",
   "signal_gate_example.exs",
-  "rate_limiter_example.exs"
+  "rate_limiter_example.exs",
+  # v0.4.0 - ItemBatcher
+  "item_batcher_example.exs"
 ]
 
 Enum.each(example_files, fn file -> Code.require_file(file, __DIR__) end)

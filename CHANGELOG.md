@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telemetry events for ItemReader and distributed scatter batches
 - Example `item_reader_example.exs` and ItemReader docs/README sections
 - Migration `0011_add_item_reader_fields.exs`
+- ItemBatcher DSL: `batch_options`, `max_items_per_batch`, `max_bytes_per_batch`, `size_fn`, `group_by`, `max_items_per_group`, `batch_fn`, `batch_input`, `on_item_error`
+- `FlowStone.Scatter.BatchOptions` struct for batch configuration
+- `FlowStone.Scatter.Batcher` module for batch grouping strategies (fixed size, size-based, group_by, custom)
+- `FlowStone.Workers.ScatterBatchWorker` for batched scatter execution
+- Context batch fields: `batch_index`, `batch_count`, `batch_items`, `batch_input`
+- Telemetry events for batching: `[:flowstone, :scatter, :batch_create | :batch_start | :batch_complete | :batch_fail]`
+- Example `item_batcher_example.exs` and ItemBatcher docs/README sections
+- Migration `0012_add_item_batcher_fields.exs`
 
 ### Changed
 

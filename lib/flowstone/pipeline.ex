@@ -723,4 +723,105 @@ defmodule FlowStone.Pipeline do
       raise ArgumentError, "#{name} must be used inside scatter_from"
     end
   end
+
+  @doc """
+  Configure batch options for scatter execution.
+
+  Batching groups scatter items into batches for more efficient execution
+  patterns like ECS tasks or batch APIs.
+
+  ## Available Options
+
+  - `max_items_per_batch` - Maximum items per batch (default: 10)
+  - `max_bytes_per_batch` + `size_fn` - Size-based batching
+  - `group_by` + `max_items_per_group` - Group items before batching
+  - `batch_fn` - Custom batching function
+  - `batch_input` - Shared batch context (function or map)
+  - `on_item_error` - `:fail_batch` (default) or `:collect_errors`
+
+  ## Example
+
+      batch_options do
+        max_items_per_batch 20
+        batch_input fn deps -> %{region_id: deps.region.id} end
+        on_item_error :fail_batch
+      end
+  """
+  defmacro batch_options(do: block) do
+    quote do
+      var!(batch_opts) = %{}
+      unquote(block)
+      var!(current_asset) = %{var!(current_asset) | batch_options: var!(batch_opts)}
+    end
+  end
+
+  defmacro max_items_per_batch(value) do
+    ensure_batch_options!(__CALLER__, "max_items_per_batch")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :max_items_per_batch, unquote(value))
+    end
+  end
+
+  defmacro max_bytes_per_batch(value) do
+    ensure_batch_options!(__CALLER__, "max_bytes_per_batch")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :max_bytes_per_batch, unquote(value))
+    end
+  end
+
+  defmacro size_fn(value) do
+    ensure_batch_options!(__CALLER__, "size_fn")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :size_fn, unquote(value))
+    end
+  end
+
+  defmacro group_by(value) do
+    ensure_batch_options!(__CALLER__, "group_by")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :group_by, unquote(value))
+    end
+  end
+
+  defmacro max_items_per_group(value) do
+    ensure_batch_options!(__CALLER__, "max_items_per_group")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :max_items_per_group, unquote(value))
+    end
+  end
+
+  defmacro batch_fn(value) do
+    ensure_batch_options!(__CALLER__, "batch_fn")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :batch_fn, unquote(value))
+    end
+  end
+
+  defmacro batch_input(value) do
+    ensure_batch_options!(__CALLER__, "batch_input")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :batch_input, unquote(value))
+    end
+  end
+
+  defmacro on_item_error(value) do
+    ensure_batch_options!(__CALLER__, "on_item_error")
+
+    quote do
+      var!(batch_opts) = Map.put(var!(batch_opts), :on_item_error, unquote(value))
+    end
+  end
+
+  defp ensure_batch_options!(env, name) do
+    unless Macro.Env.has_var?(env, {:batch_opts, nil}) do
+      raise ArgumentError, "#{name} must be used inside batch_options"
+    end
+  end
 end

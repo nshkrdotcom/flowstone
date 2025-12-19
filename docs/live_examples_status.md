@@ -14,6 +14,7 @@ This document tracks what the live examples (in `examples/`) currently demonstra
 - Failure-path demonstration with materialization recording.
 - Parallel branches with join coordination and partial failure handling.
 - ItemReader streaming scatter inputs with custom reader checkpointing.
+- ItemBatcher batch scatter execution with fixed-size batching and shared batch context.
 
 ## Remaining / To Add
 - Additional IO manager demos (S3/Parquet real integrations).

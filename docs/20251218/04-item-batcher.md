@@ -1,6 +1,6 @@
 # Design Doc: ItemBatcher
 
-**Status:** Revised Draft
+**Status:** Implemented
 **Author:** AI Assistant
 **Date:** 2025-12-18
 **FlowStone Version:** 0.4.0 (proposed)

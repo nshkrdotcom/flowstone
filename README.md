@@ -287,6 +287,35 @@ asset :processed_items do
 end
 ```
 
+### ItemBatcher (Batch Scatter Execution)
+
+Group scatter items into batches for efficient execution (similar to Step Functions ItemBatcher):
+
+```elixir
+asset :batched_processor do
+  depends_on [:source_items]
+
+  scatter fn %{source_items: items} ->
+    Enum.map(items, &%{item_id: &1.id})
+  end
+
+  batch_options do
+    max_items_per_batch 20
+    batch_input fn deps -> %{total: length(deps.source_items)} end
+    on_item_error :fail_batch
+  end
+
+  execute fn ctx, _deps ->
+    # ctx.batch_items - list of items in this batch
+    # ctx.batch_input - shared batch context
+    # ctx.batch_index - zero-based batch index
+    # ctx.batch_count - total number of batches
+    sum = Enum.sum(Enum.map(ctx.batch_items, & &1["item_id"]))
+    {:ok, %{batch_sum: sum}}
+  end
+end
+```
+
 ### Signal Gate (Durable External Suspension)
 
 Zero-resource waiting for external signals (webhooks, callbacks):

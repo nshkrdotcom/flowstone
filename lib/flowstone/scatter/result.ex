@@ -25,6 +25,10 @@ defmodule FlowStone.Scatter.Result do
     field :error, :map
     field :duration_ms, :integer
     field :completed_at, :utc_datetime_usec
+    # Batch fields
+    field :batch_index, :integer
+    field :batch_items, {:array, :map}
+    field :batch_input, :map
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -40,12 +44,25 @@ defmodule FlowStone.Scatter.Result do
           error: map() | nil,
           duration_ms: non_neg_integer() | nil,
           completed_at: DateTime.t() | nil,
+          batch_index: non_neg_integer() | nil,
+          batch_items: [map()] | nil,
+          batch_input: map() | nil,
           inserted_at: DateTime.t(),
           updated_at: DateTime.t()
         }
 
   @required_fields [:barrier_id, :scatter_key_hash, :scatter_key]
-  @optional_fields [:scatter_index, :status, :result, :error, :duration_ms, :completed_at]
+  @optional_fields [
+    :scatter_index,
+    :status,
+    :result,
+    :error,
+    :duration_ms,
+    :completed_at,
+    :batch_index,
+    :batch_items,
+    :batch_input
+  ]
 
   @doc """
   Build a changeset for creating a result.

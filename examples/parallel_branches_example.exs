@@ -13,8 +13,7 @@ defmodule Examples.ParallelBranchesExample do
 
     IO.puts("==> Parallel branches example")
     IO.puts("Run id: #{run_id}")
-    IO.puts("Expected error: optional branch :process_keywords fails (demo)")
-    IO.puts("")
+    IO.write(:stderr, "\nExpected error: optional branch :process_keywords fails (demo): ")
 
     FlowStone.materialize_all(:parallel_enrich,
       partition: partition,
