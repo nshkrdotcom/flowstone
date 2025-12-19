@@ -44,7 +44,7 @@ defmodule FlowStone.Materialization do
     field :asset_name, :string
     field :partition, :string
     field :run_id, Ecto.UUID
-    field :status, Ecto.Enum, values: [:pending, :running, :success, :failed, :waiting_approval]
+    field :status, Ecto.Enum, values: [:pending, :running, :success, :failed, :waiting_approval, :skipped]
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
     field :duration_ms, :integer

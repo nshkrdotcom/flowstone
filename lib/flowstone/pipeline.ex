@@ -124,6 +124,60 @@ defmodule FlowStone.Pipeline do
   end
 
   @doc """
+  Define routing behavior for an asset.
+
+  Supports either a `route do ... end` block with choices, or
+  a direct `route fn deps -> ... end` function.
+  """
+  defmacro route(do: block) do
+    quote do
+      var!(route_rules) = %{choices: [], default: nil}
+      var!(current_asset) = %{var!(current_asset) | route_error_policy: :fail, route_fn: nil}
+      unquote(block)
+      var!(current_asset) = %{var!(current_asset) | route_rules: var!(route_rules)}
+    end
+  end
+
+  defmacro route(fun) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | route_fn: unquote(fun), route_rules: nil}
+    end
+  end
+
+  defmacro choice(asset, when: fun) do
+    quote do
+      var!(route_rules) =
+        Map.update!(var!(route_rules), :choices, fn choices ->
+          choices ++ [{unquote(asset), unquote(fun)}]
+        end)
+    end
+  end
+
+  defmacro default(asset) do
+    quote do
+      var!(route_rules) = Map.put(var!(route_rules), :default, unquote(asset))
+    end
+  end
+
+  defmacro on_error(policy) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | route_error_policy: unquote(policy)}
+    end
+  end
+
+  defmacro routed_from(router_asset) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | routed_from: unquote(router_asset)}
+    end
+  end
+
+  defmacro optional_deps(deps) when is_list(deps) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | optional_deps: unquote(deps)}
+    end
+  end
+
+  @doc """
   Define a scatter function for dynamic fan-out.
 
   The scatter function receives upstream dependencies and returns

@@ -78,6 +78,23 @@ defmodule FlowStone.Materializations do
     end
   end
 
+  @spec record_skipped(atom(), term(), binary(), integer(), keyword()) :: :ok | {:error, term()}
+  def record_skipped(asset, partition, run_id, duration_ms, opts \\ []) do
+    if use_repo?(opts) do
+      upsert_record(asset, partition, run_id, %{
+        status: :skipped,
+        completed_at: DateTime.utc_now(),
+        duration_ms: duration_ms
+      })
+    else
+      store = Keyword.get(opts, :store, MaterializationStore)
+
+      maybe_store(store, fn ->
+        MaterializationStore.record_skipped(asset, partition, run_id, duration_ms, store)
+      end)
+    end
+  end
+
   def record_waiting_approval(asset, partition, run_id, opts \\ []) do
     if use_repo?(opts) do
       upsert_record(asset, partition, run_id, %{

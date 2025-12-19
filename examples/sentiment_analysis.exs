@@ -35,7 +35,7 @@ defmodule Examples.SentimentAnalysis do
     {:ok, ai_resource} = FlowStone.AI.Resource.init()
     Process.put(:ai_resource, ai_resource)
 
-    FlowStone.register(Pipeline, registry: :sentiment_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :sentiment_registry)
 
     IO.puts("Starting Sentiment Analysis Pipeline...")
     IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")

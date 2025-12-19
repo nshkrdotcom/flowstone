@@ -32,7 +32,7 @@ end
 
 FlowStone records materialization metadata including:
 
-- `status` (`:pending`, `:running`, `:success`, `:failed`, `:waiting_approval`)
+- `status` (`:pending`, `:running`, `:success`, `:failed`, `:waiting_approval`, `:skipped`)
 - timing (`started_at`, `completed_at`, `duration_ms`)
 - run correlation (`run_id`)
 

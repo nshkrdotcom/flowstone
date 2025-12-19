@@ -89,6 +89,36 @@ defmodule FlowStone.MaterializationStore do
     :ok
   end
 
+  def record_skipped(asset, partition, run_id, duration_ms, server \\ __MODULE__) do
+    key = normalize_key(asset, partition, run_id)
+    now = DateTime.utc_now()
+
+    Agent.update(server, fn state ->
+      Map.update(
+        state,
+        key,
+        %{
+          asset: asset,
+          partition: partition,
+          run_id: run_id,
+          status: :skipped,
+          started_at: now,
+          completed_at: now,
+          duration_ms: duration_ms
+        },
+        fn entry ->
+          Map.merge(entry, %{
+            status: :skipped,
+            completed_at: now,
+            duration_ms: duration_ms
+          })
+        end
+      )
+    end)
+
+    :ok
+  end
+
   def get(asset, partition, run_id, server \\ __MODULE__) do
     key = normalize_key(asset, partition, run_id)
     Agent.get(server, &Map.get(&1, key))

@@ -32,6 +32,7 @@ defmodule FlowStone.Context do
       partition: partition,
       run_id: run_id,
       resources: resources,
+      metadata: Keyword.get(opts, :metadata, %{}),
       started_at: DateTime.utc_now()
     }
   end

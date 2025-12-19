@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-12-18
+
+### Added
+
+- Conditional routing DSL: `route` (block or fn), `choice`, `default`, `on_error`, `routed_from`, `optional_deps`
+- Routing decision persistence: `flowstone_route_decisions`, `FlowStone.RouteDecision`, `FlowStone.RouteDecisions`
+- Routing telemetry events: `[:flowstone, :route, :start | :stop | :error]`
+- Example `conditional_routing_example.exs` and routing docs/README sections
+- Migration `0009_create_route_decisions.exs`
+
+### Changed
+
+- Materialization status now includes `:skipped` for unselected routed assets
+- Executor/materializer/worker honor persisted routing decisions and skip IO writes when not selected
+- Optional dependencies resolve to `nil` and are ignored in dependency gating and lineage
+- DAG validation enforces routed_from router assets, optional_deps subset, and implicit router edges
+
 ## [0.3.0] - 2025-12-18
 
 ### Added
@@ -93,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Initial Release
 
+[0.4.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nshkrdotcom/flowstone/releases/tag/v0.1.0

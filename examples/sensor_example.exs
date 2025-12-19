@@ -5,7 +5,7 @@ defmodule Examples.SensorExample do
     ensure_started(FlowStone.Registry, name: :examples_sensor_registry)
     ensure_started(FlowStone.IO.Memory, name: :examples_sensor_io)
 
-    FlowStone.register(Pipeline, registry: :examples_sensor_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_sensor_registry)
 
     sensor = %{
       name: :demo_sensor,

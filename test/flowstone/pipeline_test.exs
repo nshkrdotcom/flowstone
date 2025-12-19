@@ -69,4 +69,85 @@ defmodule FlowStone.PipelineTest do
   test "detects cycles in DAG" do
     assert {:error, {:cycle, _}} = DAG.from_assets(CyclicPipeline.__flowstone_assets__())
   end
+
+  defmodule RoutingPipeline do
+    use FlowStone.Pipeline
+
+    asset :source do
+      execute fn _, _ -> {:ok, :source} end
+    end
+
+    asset :router do
+      depends_on([:source])
+
+      route do
+        choice(:branch_a, when: fn _deps -> true end)
+        default(:branch_b)
+        on_error({:fallback, :branch_b})
+      end
+    end
+
+    asset :branch_a do
+      routed_from(:router)
+      depends_on([:source])
+      execute fn _, _ -> {:ok, :a} end
+    end
+
+    asset :branch_b do
+      routed_from(:router)
+      depends_on([:source])
+      execute fn _, _ -> {:ok, :b} end
+    end
+  end
+
+  test "captures route choices and defaults" do
+    router = Enum.find(RoutingPipeline.__flowstone_assets__(), &(&1.name == :router))
+
+    assert %{choices: [{:branch_a, when_fn}], default: :branch_b} = router.route_rules
+    assert is_function(when_fn, 1)
+    assert router.route_error_policy == {:fallback, :branch_b}
+  end
+
+  test "adds implicit edge from router to routed assets" do
+    assert {:ok, graph} = DAG.from_assets(RoutingPipeline.__flowstone_assets__())
+    assert :router in Map.fetch!(graph.edges, :branch_a)
+    assert :router in Map.fetch!(graph.edges, :branch_b)
+  end
+
+  defmodule OptionalDepsInvalidPipeline do
+    use FlowStone.Pipeline
+
+    asset :upstream do
+      execute fn _, _ -> {:ok, :up} end
+    end
+
+    asset :merge do
+      depends_on([:upstream])
+      optional_deps([:upstream, :missing])
+      execute fn _, _ -> {:ok, :merged} end
+    end
+  end
+
+  test "validates optional_deps are subset of depends_on" do
+    assert {:error, {:invalid, _}} =
+             DAG.from_assets(OptionalDepsInvalidPipeline.__flowstone_assets__())
+  end
+
+  defmodule RoutedFromInvalidPipeline do
+    use FlowStone.Pipeline
+
+    asset :not_router do
+      execute fn _, _ -> {:ok, :noop} end
+    end
+
+    asset :branch do
+      routed_from(:not_router)
+      execute fn _, _ -> {:ok, :branch} end
+    end
+  end
+
+  test "validates routed_from references a router asset" do
+    assert {:error, {:invalid, _}} =
+             DAG.from_assets(RoutedFromInvalidPipeline.__flowstone_assets__())
+  end
 end

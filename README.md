@@ -70,7 +70,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:flowstone, "~> 0.3.0"}
+    {:flowstone, "~> 0.4.0"}
   ]
 end
 ```
@@ -280,6 +280,39 @@ asset :embedded_documents do
 end
 ```
 
+### Conditional Routing
+
+Select a single branch at runtime and skip the rest:
+
+```elixir
+asset :router do
+  depends_on [:input]
+
+  route do
+    choice :branch_a, when: fn %{input: %{mode: :a}} -> true end
+    default :branch_b
+  end
+end
+
+asset :branch_a do
+  routed_from :router
+  depends_on [:input]
+  execute fn _, _ -> {:ok, :a} end
+end
+
+asset :branch_b do
+  routed_from :router
+  depends_on [:input]
+  execute fn _, _ -> {:ok, :b} end
+end
+
+asset :merge do
+  depends_on [:branch_a, :branch_b]
+  optional_deps [:branch_a, :branch_b]
+  execute fn _, deps -> {:ok, deps[:branch_a] || deps[:branch_b]} end
+end
+```
+
 ### Rate Limiting
 
 Distributed rate limiting for APIs and external services:
@@ -304,6 +337,7 @@ FlowStone emits telemetry events for observability:
 - `[:flowstone, :materialization, :start | :stop | :exception]`
 - `[:flowstone, :scatter, :start | :complete | :failed | :instance_complete | :instance_fail]`
 - `[:flowstone, :signal_gate, :create | :signal | :timeout]`
+- `[:flowstone, :route, :start | :stop | :error]`
 - `[:flowstone, :rate_limit, :check | :wait | :slot_acquired | :slot_released]`
 
 ## Documentation
@@ -312,6 +346,7 @@ FlowStone emits telemetry events for observability:
 - **Architecture decisions:** `docs/adr/README.md`
 - **Comparison with Handoff:** `docs/20251215/flowstone-vs-handoff-comparison.md`
 - **Rebuild analysis:** `docs/20251215/rebuild-analysis.md`
+- **Examples:** `examples/README.md` (run all via `MIX_ENV=dev mix run examples/run_all.exs` or `MIX_ENV=dev bash examples/run_all.sh`)
 
 ## Contributing
 

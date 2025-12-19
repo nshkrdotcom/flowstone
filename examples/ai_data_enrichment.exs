@@ -36,7 +36,7 @@ defmodule Examples.AIDataEnrichment do
     # Store AI resource for assets to access
     Process.put(:ai_resource, ai_resource)
 
-    FlowStone.register(Pipeline, registry: :enrichment_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :enrichment_registry)
 
     IO.puts("Starting AI Data Enrichment Pipeline...")
     IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")

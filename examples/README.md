@@ -18,6 +18,7 @@ This folder contains runnable examples that exercise core FlowStone features end
   # or
   MIX_ENV=dev bash examples/run_all.sh
   ```
+- `examples/run_all.sh` is a convenience wrapper around `examples/run_all.exs`.
 - Individually:
   ```bash
   MIX_ENV=dev mix run examples/core_example.exs
@@ -32,6 +33,7 @@ This folder contains runnable examples that exercise core FlowStone features end
 - `postgres_io_example.exs` — Postgres IO manager with composite partitions.
 - `sensor_example.exs` — sensor trigger using S3FileArrival with a mock list function.
 - `failure_example.exs` — failure path with materialization recording and error capture.
+- `conditional_routing_example.exs` — runtime branch selection with router assets.
 
 ## Advanced Examples (v0.3.0+)
 

@@ -8,7 +8,7 @@ defmodule Examples.PostgresIOExample do
     ensure_table()
     ensure_started(FlowStone.Registry, name: :examples_pg_registry)
 
-    FlowStone.register(Pipeline, registry: :examples_pg_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_pg_registry)
 
     partition = {:tenant_1, "west"}
     io_opts = [io_manager: :postgres, config: %{table: @table, format: :binary}]
@@ -51,7 +51,11 @@ defmodule Examples.PostgresIOExample do
       partitioned_by({:tenant, :region})
 
       execute fn ctx, _deps ->
-        {:ok, %{partition: ctx.partition, stored_at: DateTime.utc_now()}}
+        {:ok,
+         %{
+           partition: FlowStone.Partition.serialize(ctx.partition),
+           stored_at: DateTime.utc_now()
+         }}
       end
     end
   end

@@ -129,11 +129,23 @@ end
 ## 4. Execution Semantics
 
 1. Router asset materializes normally and evaluates the route.
-2. The decision is persisted and returned as the router asset output.
+2. The decision is persisted and returned as the router asset output:
+
+   ```elixir
+   %{
+     decision_id: "uuid",
+     router_asset: :identify_region_router,
+     selected_branch: :identify_region_mgrs | :identify_region_name | nil,
+     available_branches: [:identify_region_mgrs, :identify_region_name]
+   }
+   ```
+
+   `selected_branch` is `nil` when routing skips all branches.
 3. Routed assets have an implicit dependency on the router asset.
 4. When a routed asset starts, it checks the decision:
    - If selected, execute as normal.
-   - If not selected, mark as skipped and return `{:ok, :skipped}`.
+   - If not selected, mark as skipped and return `{:ok, :skipped}` (Executor return).
+     Skipped assets do not write to the IO manager.
 5. Downstream assets with `optional_deps` ignore missing or skipped dependencies.
 
 ### 4.1 Replay and Idempotency
@@ -248,4 +260,3 @@ When `compatibility_mode: :step_functions` is enabled, defaults are:
 - Unit tests for route rule compilation and decision replay.
 - Integration tests for optional deps and skipped branches.
 - Failure tests for router exceptions and fallback behavior.
-

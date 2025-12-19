@@ -35,7 +35,7 @@ defmodule Examples.ContentPipeline do
     {:ok, ai_resource} = FlowStone.AI.Resource.init()
     Process.put(:ai_resource, ai_resource)
 
-    FlowStone.register(Pipeline, registry: :content_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :content_registry)
 
     IO.puts("Starting Content Generation Pipeline...")
     IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")

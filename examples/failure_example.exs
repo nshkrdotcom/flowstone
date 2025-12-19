@@ -6,7 +6,7 @@ defmodule Examples.FailureExample do
     ensure_started(FlowStone.IO.Memory, name: :examples_failure_io)
     ensure_started(FlowStone.MaterializationStore, name: :examples_failure_store)
 
-    FlowStone.register(Pipeline, registry: :examples_failure_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_failure_registry)
 
     run_id = Ecto.UUID.generate()
 

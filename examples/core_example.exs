@@ -5,9 +5,9 @@ defmodule Examples.CoreExample do
     ensure_started(FlowStone.Registry, name: :examples_core_registry)
     ensure_started(FlowStone.IO.Memory, name: :examples_core_io)
 
-    FlowStone.register(Pipeline, registry: :examples_core_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_core_registry)
 
-    FlowStone.materialize(:echo,
+    FlowStone.materialize_all(:echo,
       partition: :demo,
       registry: :examples_core_registry,
       io: [config: %{agent: :examples_core_io}],

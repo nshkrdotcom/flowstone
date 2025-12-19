@@ -5,11 +5,7 @@ defmodule Examples.TelemetryExample do
     ensure_started(FlowStone.Registry, name: :examples_telemetry_registry)
     ensure_started(FlowStone.IO.Memory, name: :examples_telemetry_io)
 
-    FlowStone.register(Pipeline, registry: :examples_telemetry_registry)
-
-    handler = fn event, measurements, metadata, pid ->
-      send(pid, {:event, event, measurements, metadata})
-    end
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_telemetry_registry)
 
     :telemetry.attach_many(
       "examples-telemetry",
@@ -18,7 +14,7 @@ defmodule Examples.TelemetryExample do
         [:flowstone, :materialization, :stop],
         [:flowstone, :materialization, :exception]
       ],
-      handler,
+      &__MODULE__.handle_event/4,
       self()
     )
 
@@ -43,6 +39,10 @@ defmodule Examples.TelemetryExample do
     after
       200 -> Enum.reverse(acc)
     end
+  end
+
+  def handle_event(event, measurements, metadata, pid) do
+    send(pid, {:event, event, measurements, metadata})
   end
 
   defp ensure_started(mod, opts) do

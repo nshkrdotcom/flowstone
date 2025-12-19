@@ -1,7 +1,7 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
@@ -79,7 +79,7 @@ defmodule FlowStone.MixProject do
       {:ex_aws_s3, "~> 2.5", optional: true},
 
       # Testing
-      {:supertester, "~> 0.3", only: :test},
+      {:supertester, "~> 0.3.1", only: :test},
       {:mox, "~> 1.1", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: :test},
@@ -168,6 +168,8 @@ defmodule FlowStone.MixProject do
         ],
         Execution: [
           FlowStone.Materializer,
+          FlowStone.RouteDecisions,
+          FlowStone.RouteDecision,
           FlowStone.Workers.AssetWorker,
           FlowStone.Workers.CheckpointTimeout,
           FlowStone.Workers.ScatterWorker,

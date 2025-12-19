@@ -97,7 +97,7 @@ IO.puts("FlowStone Signal Gate Example")
 IO.puts("=" |> String.duplicate(60))
 
 # Use existing servers from the application or start named ones
-defmodule ExampleHelper do
+defmodule SignalGateExample.Helper do
   def ensure_started(module, name) do
     case Process.whereis(name) do
       nil ->
@@ -111,13 +111,16 @@ defmodule ExampleHelper do
 end
 
 # Register the pipeline (use existing servers or start new ones)
-registry = ExampleHelper.ensure_started(FlowStone.Registry, FlowStone.Registry)
-_io_store = ExampleHelper.ensure_started(FlowStone.IO.Memory, FlowStone.IO.Memory)
+registry = SignalGateExample.Helper.ensure_started(FlowStone.Registry, FlowStone.Registry)
+_io_store = SignalGateExample.Helper.ensure_started(FlowStone.IO.Memory, FlowStone.IO.Memory)
 
 _mat_store =
-  ExampleHelper.ensure_started(FlowStone.MaterializationStore, FlowStone.MaterializationStore)
+  SignalGateExample.Helper.ensure_started(
+    FlowStone.MaterializationStore,
+    FlowStone.MaterializationStore
+  )
 
-_lineage = ExampleHelper.ensure_started(FlowStone.Lineage, FlowStone.Lineage)
+_lineage = SignalGateExample.Helper.ensure_started(FlowStone.Lineage, FlowStone.Lineage)
 
 FlowStone.register(SignalGateExample, registry: registry)
 

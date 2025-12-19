@@ -16,6 +16,10 @@ defmodule FlowStone.Asset do
     :partitioned_by,
     :partition_fn,
     :execute_fn,
+    # Routing support
+    :route_fn,
+    :route_rules,
+    :routed_from,
     # Scatter support
     :scatter_fn,
     :scatter_options,
@@ -26,6 +30,8 @@ defmodule FlowStone.Asset do
     metadata: %{},
     tags: [],
     depends_on: [],
+    optional_deps: [],
+    route_error_policy: :fail,
     requires: []
   ]
 
@@ -40,6 +46,13 @@ defmodule FlowStone.Asset do
           partitioned_by: term(),
           partition_fn: (term() -> term()) | nil,
           execute_fn: (any(), map() -> {:ok, term()} | {:error, term()}) | nil,
+          route_fn: (map() -> atom() | nil | {:error, term()}) | nil,
+          route_rules:
+            %{choices: [{name(), (map() -> boolean())}], default: name() | nil}
+            | nil,
+          routed_from: name() | nil,
+          optional_deps: [name()],
+          route_error_policy: :fail | {:fallback, name()},
           scatter_fn: (map() -> [map()]) | nil,
           scatter_options: map() | nil,
           gather_fn: (map() -> term()) | nil,

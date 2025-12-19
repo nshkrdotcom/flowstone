@@ -7,7 +7,7 @@ defmodule FlowStone.Materialization do
   import Ecto.Changeset
 
   @primary_key {:id, :binary_id, autogenerate: true}
-  @statuses [:pending, :running, :success, :failed, :waiting_approval]
+  @statuses [:pending, :running, :success, :failed, :waiting_approval, :skipped]
 
   schema "flowstone_materializations" do
     field :asset_name, :string

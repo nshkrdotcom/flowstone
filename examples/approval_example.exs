@@ -5,7 +5,7 @@ defmodule Examples.ApprovalExample do
     ensure_started(FlowStone.Registry, name: :examples_approval_registry)
     ensure_started(FlowStone.IO.Memory, name: :examples_approval_io)
 
-    FlowStone.register(Pipeline, registry: :examples_approval_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_approval_registry)
 
     FlowStone.materialize(:gated,
       partition: :await,

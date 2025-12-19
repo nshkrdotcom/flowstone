@@ -6,7 +6,7 @@ defmodule Examples.BackfillExample do
     ensure_started(FlowStone.IO.Memory, name: :examples_backfill_io)
     ensure_started(FlowStone.MaterializationStore, name: :examples_backfill_store)
 
-    FlowStone.register(Pipeline, registry: :examples_backfill_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_backfill_registry)
 
     {:ok, result} =
       FlowStone.backfill(:daily_metric,

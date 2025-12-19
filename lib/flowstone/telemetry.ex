@@ -32,6 +32,12 @@ defmodule FlowStone.Telemetry do
   - `[:flowstone, :rate_limit, :wait]` - Operation rate limited
   - `[:flowstone, :rate_limit, :slot_acquired]` - Semaphore slot acquired
   - `[:flowstone, :rate_limit, :slot_released]` - Semaphore slot released
+
+  ## Routing Events
+
+  - `[:flowstone, :route, :start]` - Routing evaluation started
+  - `[:flowstone, :route, :stop]` - Routing decision recorded
+  - `[:flowstone, :route, :error]` - Routing evaluation failed
   """
 
   @events [
@@ -72,7 +78,11 @@ defmodule FlowStone.Telemetry do
     [:flowstone, :rate_limit, :check],
     [:flowstone, :rate_limit, :wait],
     [:flowstone, :rate_limit, :slot_acquired],
-    [:flowstone, :rate_limit, :slot_released]
+    [:flowstone, :rate_limit, :slot_released],
+    # Routing
+    [:flowstone, :route, :start],
+    [:flowstone, :route, :stop],
+    [:flowstone, :route, :error]
   ]
 
   def events, do: @events

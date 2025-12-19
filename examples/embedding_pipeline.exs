@@ -34,7 +34,7 @@ defmodule Examples.EmbeddingPipeline do
     {:ok, ai_resource} = FlowStone.AI.Resource.init()
     Process.put(:ai_resource, ai_resource)
 
-    FlowStone.register(Pipeline, registry: :embedding_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :embedding_registry)
 
     IO.puts("Starting Embedding Generation Pipeline...")
     IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")

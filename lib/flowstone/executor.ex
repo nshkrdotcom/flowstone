@@ -3,7 +3,7 @@ defmodule FlowStone.Executor do
   Executes a single asset, loading dependencies and storing results via I/O managers.
   """
 
-  alias FlowStone.{AuditLogContext, Context, Error, Materializer, Registry}
+  alias FlowStone.{AuditLogContext, Context, Error, Materializer, Registry, RouteDecisions}
 
   @spec materialize(atom(), keyword()) :: {:ok, term()} | {:error, Error.t()} | {:error, term()}
   def materialize(asset_name, opts) do
@@ -31,8 +31,12 @@ defmodule FlowStone.Executor do
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
 
     with {:ok, asset} <- Registry.fetch(asset_name, server: registry),
-         {:ok, deps} <- load_dependencies(asset, partition, io_opts),
-         context <- Context.build(asset, partition, run_id, resource_server: resource_server) do
+         {:ok, deps} <- load_dependencies(asset, partition, run_id, io_opts),
+         context <-
+           Context.build(asset, partition, run_id,
+             resource_server: resource_server,
+             metadata: %{route_branches: route_branches(asset, registry)}
+           ) do
       start_time = System.monotonic_time(:millisecond)
       telemetry_start(asset.name, partition, run_id)
       record_start(asset.name, partition, run_id, mat_store, use_repo)
@@ -47,6 +51,12 @@ defmodule FlowStone.Executor do
           record_lineage(asset.name, partition, run_id, deps, lineage_server, use_repo)
           {:ok, result}
 
+        {:skipped, _reason} ->
+          duration = System.monotonic_time(:millisecond) - start_time
+          record_skipped(asset.name, partition, run_id, duration, mat_store, use_repo)
+          telemetry_stop(asset.name, partition, run_id, duration)
+          {:ok, :skipped}
+
         {:error, %Error{} = err} ->
           record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
           telemetry_exception(asset.name, partition, run_id, err)
@@ -55,25 +65,42 @@ defmodule FlowStone.Executor do
     end
   end
 
-  defp load_dependencies(asset, partition, io_opts) do
+  defp load_dependencies(asset, partition, run_id, io_opts) do
     deps = Map.get(asset, :depends_on, [])
+    optional = Map.get(asset, :optional_deps, [])
 
-    results =
-      Enum.reduce_while(deps, %{}, fn dep, acc ->
-        case FlowStone.IO.load(dep, partition, io_opts) do
-          {:ok, data} -> {:cont, Map.put(acc, dep, data)}
-          {:error, _} -> {:halt, {:missing, dep}}
+    with :ok <- ensure_route_decision(asset, partition, run_id) do
+      results =
+        Enum.reduce_while(deps, %{}, fn dep, acc ->
+          load_single_dep(dep, partition, io_opts, optional, acc)
+        end)
+
+      case results do
+        {:missing, dep} -> {:error, Error.dependency_not_ready(asset.name, [dep])}
+        map when is_map(map) -> {:ok, map}
+      end
+    end
+  end
+
+  defp load_single_dep(dep, partition, io_opts, optional, acc) do
+    case FlowStone.IO.load(dep, partition, io_opts) do
+      {:ok, data} ->
+        {:cont, Map.put(acc, dep, data)}
+
+      {:error, _} ->
+        if dep in optional do
+          {:cont, Map.put(acc, dep, nil)}
+        else
+          {:halt, {:missing, dep}}
         end
-      end)
-
-    case results do
-      {:missing, dep} -> {:error, Error.dependency_not_ready(asset.name, [dep])}
-      map when is_map(map) -> {:ok, map}
     end
   end
 
   defp record_lineage(asset, partition, run_id, deps, server, use_repo) do
-    pairs = Enum.map(deps, fn {dep, _data} -> {dep, partition} end)
+    pairs =
+      deps
+      |> Enum.reject(fn {_dep, data} -> is_nil(data) end)
+      |> Enum.map(fn {dep, _data} -> {dep, partition} end)
 
     FlowStone.LineagePersistence.record(asset, partition, run_id, pairs,
       server: server,
@@ -97,6 +124,13 @@ defmodule FlowStone.Executor do
 
   defp record_failure(asset, partition, run_id, error, store, use_repo) do
     FlowStone.Materializations.record_failure(asset, partition, run_id, error,
+      store: store,
+      use_repo: use_repo
+    )
+  end
+
+  defp record_skipped(asset, partition, run_id, duration_ms, store, use_repo) do
+    FlowStone.Materializations.record_skipped(asset, partition, run_id, duration_ms,
       store: store,
       use_repo: use_repo
     )
@@ -135,11 +169,39 @@ defmodule FlowStone.Executor do
         resource_type: "asset",
         resource_id: Atom.to_string(asset),
         action: "materialized",
-        details: %{run_id: run_id, partition: partition}
+        details: %{run_id: run_id, partition: FlowStone.Partition.serialize(partition)}
       )
     else
       :ok
     end
+  end
+
+  defp ensure_route_decision(asset, partition, run_id) do
+    case Map.get(asset, :routed_from) do
+      nil ->
+        :ok
+
+      router_asset ->
+        case RouteDecisions.get(run_id, router_asset, partition) do
+          {:ok, _decision} -> :ok
+          {:error, :not_found} -> {:error, Error.dependency_not_ready(asset.name, [router_asset])}
+        end
+    end
+  end
+
+  defp route_branches(asset, registry) do
+    if router_asset?(asset) do
+      Registry.list(server: registry)
+      |> Enum.filter(fn candidate -> candidate.routed_from == asset.name end)
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+    else
+      []
+    end
+  end
+
+  defp router_asset?(asset) do
+    not is_nil(Map.get(asset, :route_fn)) or not is_nil(Map.get(asset, :route_rules))
   end
 
   # Get a value from opts, falling back to default_fn if key is missing or nil.

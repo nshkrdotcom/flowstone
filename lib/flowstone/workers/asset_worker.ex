@@ -22,7 +22,7 @@ defmodule FlowStone.Workers.AssetWorker do
     max_attempts: 5,
     unique: [period: 60, fields: [:args], keys: [:asset_name, :partition, :run_id]]
 
-  alias FlowStone.{Error, Executor, Partition, Registry, RunConfig}
+  alias FlowStone.{Error, Executor, Partition, Registry, RouteDecisions, RunConfig}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}), do: perform(%Oban.Job{args: args}, nil)
@@ -109,7 +109,7 @@ defmodule FlowStone.Workers.AssetWorker do
     registry = Keyword.get(config, :registry) || get_registry_from_config()
     io_opts = build_io_opts(config)
 
-    case check_dependencies(asset_name, partition, registry, io_opts) do
+    case check_dependencies(asset_name, partition, run_id, registry, io_opts) do
       :ok ->
         # Build executor options, only including non-nil values
         exec_opts =
@@ -197,16 +197,26 @@ defmodule FlowStone.Workers.AssetWorker do
 
   defp resolve_io_manager(other), do: other
 
-  defp check_dependencies(asset_name, partition, registry, io_opts) do
+  defp check_dependencies(asset_name, partition, run_id, registry, io_opts) do
     case Registry.fetch(asset_name, server: registry) do
       {:ok, asset} ->
-        missing =
-          asset.depends_on
-          |> Enum.reject(&FlowStone.IO.exists?(&1, partition, io_opts))
+        optional = Map.get(asset, :optional_deps, [])
 
-        case missing do
-          [] -> :ok
-          _ -> {:snooze, 30}
+        missing =
+          Enum.reject(asset.depends_on, fn dep ->
+            dep in optional or FlowStone.IO.exists?(dep, partition, io_opts)
+          end)
+
+        cond do
+          missing != [] ->
+            {:snooze, 30}
+
+          Map.get(asset, :routed_from) &&
+              RouteDecisions.get(run_id, asset.routed_from, partition) == {:error, :not_found} ->
+            {:snooze, 30}
+
+          true ->
+            :ok
         end
 
       _ ->

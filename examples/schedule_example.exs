@@ -6,7 +6,7 @@ defmodule Examples.ScheduleExample do
     ensure_started(FlowStone.IO.Memory, name: :examples_schedule_io)
     ensure_started(FlowStone.ScheduleStore, name: :examples_schedule_store)
 
-    FlowStone.register(Pipeline, registry: :examples_schedule_registry)
+    FlowStone.register(__MODULE__.Pipeline, registry: :examples_schedule_registry)
 
     :ok =
       FlowStone.schedule(:scheduled_asset,

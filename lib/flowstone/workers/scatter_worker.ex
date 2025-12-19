@@ -106,7 +106,10 @@ defmodule FlowStone.Workers.ScatterWorker do
         deps = load_dependencies(asset, scatter_key, io_opts)
 
         # Execute the asset
-        Materializer.execute(asset, context, deps)
+        case Materializer.execute(asset, context, deps) do
+          {:skipped, reason} -> {:ok, {:skipped, reason}}
+          other -> other
+        end
 
       {:error, _} = error ->
         error
