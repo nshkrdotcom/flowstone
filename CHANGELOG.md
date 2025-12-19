@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2025-12-18
+
+### Added
+
+#### Scatter (Dynamic Fan-Out)
+- `FlowStone.Scatter` - Core module for runtime-discovered parallel execution
+- `FlowStone.Scatter.Barrier` - Ecto schema tracking scatter completion
+- `FlowStone.Scatter.Key` - Scatter key serialization and hashing
+- `FlowStone.Scatter.Options` - Configurable scatter execution options
+- `FlowStone.Scatter.Result` - Ecto schema for scatter instance results
+- `FlowStone.Workers.ScatterWorker` - Oban worker for scatter instances
+- DSL macros: `scatter`, `scatter_options`, `gather`, `max_concurrent`, `rate_limit`, `failure_threshold`, `failure_mode`
+- Migration `0006_create_scatter_tables.exs` - Barrier and result tables
+
+#### Signal Gate (Durable External Suspension)
+- `FlowStone.SignalGate` - Core module for durable external suspension
+- `FlowStone.SignalGate.Gate` - Ecto schema for signal gates
+- `FlowStone.SignalGate.Token` - HMAC-signed token generation and validation
+- `FlowStone.Workers.SignalGateTimeoutWorker` - Timeout handling worker
+- `FlowStone.Workers.SignalGateSweeper` - Periodic sweep for missed timeouts
+- DSL macros: `on_signal`, `on_timeout`
+- Migration `0007_create_signal_gate_tables.exs` - Gate table with token indexing
+- Secure callback URL generation with expiring signed tokens
+
+#### Global Rate Limiting
+- `FlowStone.RateLimiter` - Distributed rate limiting using Hammer and Postgres advisory locks
+- Token bucket rate limiting with `check/2`, `with_limit/4`
+- Semaphore-based concurrency control with `acquire_slot/2`, `release_slot/2`, `with_slot/4`
+- Status inspection and bucket reset
+
+#### Observability
+- New telemetry events for Scatter: `[:flowstone, :scatter, :start | :complete | :failed | :cancel | :instance_complete | :instance_fail | :gather_ready]`
+- New telemetry events for Signal Gate: `[:flowstone, :signal_gate, :create | :signal | :timeout | :timeout_retry | :cancel]`
+- New telemetry events for Rate Limiting: `[:flowstone, :rate_limit, :check | :wait | :slot_acquired | :slot_released]`
+
+#### Examples
+- `scatter_example.exs` - Web scraping with parallel execution
+- `signal_gate_example.exs` - External task integration with callbacks
+- `rate_limiter_example.exs` - Rate limiting patterns
+
+### Changed
+- `FlowStone.Asset` struct now includes scatter and signal gate fields
+- `FlowStone.Pipeline` DSL expanded with scatter and signal gate macros
+- Updated documentation groups in mix.exs for new modules
+
 ## [0.2.0] - 2025-12-14
 
 ### Added
@@ -48,5 +93,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Initial Release
 
+[0.3.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nshkrdotcom/flowstone/releases/tag/v0.1.0

@@ -1,7 +1,7 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
@@ -169,7 +169,9 @@ defmodule FlowStone.MixProject do
         Execution: [
           FlowStone.Materializer,
           FlowStone.Workers.AssetWorker,
-          FlowStone.Workers.CheckpointTimeout
+          FlowStone.Workers.CheckpointTimeout,
+          FlowStone.Workers.ScatterWorker,
+          FlowStone.Workers.SignalGateTimeoutWorker
         ],
         "I/O Managers": [
           FlowStone.IO,
@@ -188,6 +190,21 @@ defmodule FlowStone.MixProject do
         Checkpoints: [
           FlowStone.Checkpoint,
           FlowStone.Checkpoint.Notifier
+        ],
+        "Scatter (Fan-Out)": [
+          FlowStone.Scatter,
+          FlowStone.Scatter.Barrier,
+          FlowStone.Scatter.Key,
+          FlowStone.Scatter.Options,
+          FlowStone.Scatter.Result
+        ],
+        "Signal Gate": [
+          FlowStone.SignalGate,
+          FlowStone.SignalGate.Gate,
+          FlowStone.SignalGate.Token
+        ],
+        "Rate Limiting": [
+          FlowStone.RateLimiter
         ],
         Resources: [
           FlowStone.Resource,

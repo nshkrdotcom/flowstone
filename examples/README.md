@@ -33,6 +33,42 @@ This folder contains runnable examples that exercise core FlowStone features end
 - `sensor_example.exs` — sensor trigger using S3FileArrival with a mock list function.
 - `failure_example.exs` — failure path with materialization recording and error capture.
 
+## Advanced Examples (v0.3.0+)
+
+### `scatter_example.exs` — Dynamic Fan-Out
+Demonstrates FlowStone's Scatter feature for parallel execution:
+- Runtime-discovered parallelism from upstream data
+- Scatter keys defining each parallel instance
+- Concurrency and rate limiting controls
+- Failure thresholds and partial success handling
+- Gather function for result aggregation
+
+```bash
+MIX_ENV=dev mix run examples/scatter_example.exs
+```
+
+### `signal_gate_example.exs` — Durable External Suspension
+Demonstrates FlowStone's Signal Gate feature for external task integration:
+- Zero-resource suspension while waiting for callbacks
+- Signed tokens for secure webhook integration
+- Timeout handling with configurable retry
+- Integration patterns for AWS ECS, Lambda, etc.
+
+```bash
+MIX_ENV=dev mix run examples/signal_gate_example.exs
+```
+
+### `rate_limiter_example.exs` — Distributed Rate Limiting
+Demonstrates FlowStone's rate limiting capabilities:
+- Per-bucket rate limiting with Hammer
+- Semaphore-based concurrency control via Postgres advisory locks
+- Domain-specific rate limits for scrapers
+- Integration with Scatter and Signal Gate
+
+```bash
+MIX_ENV=dev mix run examples/rate_limiter_example.exs
+```
+
 ## AI-Powered Examples
 
 These examples demonstrate integrating FlowStone with AI capabilities using the `flowstone_ai` adapter layer.
