@@ -16,6 +16,7 @@ defmodule FlowStone.Scatter.Barrier do
   @foreign_key_type :binary_id
 
   @statuses [:pending, :executing, :completed, :partial_failure, :failed, :cancelled]
+  @modes [:inline, :distributed]
 
   schema "flowstone_scatter_barriers" do
     field :run_id, Ecto.UUID
@@ -27,6 +28,10 @@ defmodule FlowStone.Scatter.Barrier do
     field :failed_count, :integer, default: 0
     field :status, Ecto.Enum, values: @statuses, default: :pending
     field :scatter_keys, {:array, :map}, default: []
+    field :mode, Ecto.Enum, values: @modes, default: :inline
+    field :reader_checkpoint, :map
+    field :parent_barrier_id, Ecto.UUID
+    field :batch_index, :integer
     field :options, :map, default: %{}
     field :metadata, :map, default: %{}
 
@@ -44,6 +49,10 @@ defmodule FlowStone.Scatter.Barrier do
           failed_count: non_neg_integer(),
           status: atom(),
           scatter_keys: [map()],
+          mode: atom(),
+          reader_checkpoint: map() | nil,
+          parent_barrier_id: Ecto.UUID.t() | nil,
+          batch_index: non_neg_integer() | nil,
           options: map(),
           metadata: map(),
           inserted_at: DateTime.t(),
@@ -58,6 +67,10 @@ defmodule FlowStone.Scatter.Barrier do
     :failed_count,
     :status,
     :scatter_keys,
+    :mode,
+    :reader_checkpoint,
+    :parent_barrier_id,
+    :batch_index,
     :options,
     :metadata
   ]
@@ -70,8 +83,9 @@ defmodule FlowStone.Scatter.Barrier do
     barrier
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> validate_number(:total_count, greater_than: 0)
+    |> validate_number(:total_count, greater_than_or_equal_to: 0)
     |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:mode, @modes)
   end
 
   @doc """

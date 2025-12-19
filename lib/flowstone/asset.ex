@@ -22,7 +22,11 @@ defmodule FlowStone.Asset do
     :routed_from,
     # Scatter support
     :scatter_fn,
+    :scatter_source,
+    :scatter_source_config,
     :scatter_options,
+    :item_selector_fn,
+    :scatter_mode,
     :gather_fn,
     # Signal Gate support
     :on_signal_fn,
@@ -57,7 +61,11 @@ defmodule FlowStone.Asset do
           optional_deps: [name()],
           route_error_policy: :fail | {:fallback, name()},
           scatter_fn: (map() -> [map()]) | nil,
+          scatter_source: atom() | module() | nil,
+          scatter_source_config: map() | nil,
           scatter_options: map() | nil,
+          item_selector_fn: (map(), map() -> map()) | nil,
+          scatter_mode: :inline | :distributed | nil,
           gather_fn: (map() -> term()) | nil,
           parallel_branches: %{name() => FlowStone.ParallelBranch.t()} | map(),
           parallel_options: map() | nil,

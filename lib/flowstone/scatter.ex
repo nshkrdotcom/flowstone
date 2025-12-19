@@ -36,8 +36,9 @@ defmodule FlowStone.Scatter do
   """
 
   import Ecto.Query
-  alias FlowStone.{Partition, Repo}
-  alias FlowStone.Scatter.{Barrier, Key, Options, Result}
+  alias FlowStone.{Error, Partition, Repo}
+  alias FlowStone.Scatter.{Barrier, ItemReader, Key, Options, Result}
+  alias FlowStone.Workers.{ItemReaderWorker, ScatterWorker}
 
   @type scatter_key :: Key.t()
   @type barrier :: Barrier.t()
@@ -57,10 +58,24 @@ defmodule FlowStone.Scatter do
   """
   @spec create_barrier(keyword()) :: {:ok, barrier()} | {:error, term()}
   def create_barrier(opts) do
+    scatter_keys = Keyword.fetch!(opts, :scatter_keys)
+
+    with {:ok, barrier} <- start_barrier(Keyword.put(opts, :emit_start, false)),
+         {:ok, _count} <- insert_results(barrier.id, scatter_keys) do
+      updated = Repo.get!(Barrier, barrier.id)
+      emit_telemetry(:start, updated)
+      {:ok, updated}
+    end
+  end
+
+  @doc """
+  Create a barrier with zero items for streaming readers.
+  """
+  @spec start_barrier(keyword()) :: {:ok, barrier()} | {:error, term()}
+  def start_barrier(opts) do
     run_id = Keyword.fetch!(opts, :run_id)
     asset_name = Keyword.fetch!(opts, :asset_name)
-    scatter_keys = Keyword.fetch!(opts, :scatter_keys)
-    scatter_opts = Keyword.get(opts, :options, %Options{})
+    scatter_opts = normalize_options(Keyword.get(opts, :options) || %Options{})
 
     partition =
       case Keyword.get(opts, :partition) do
@@ -68,38 +83,73 @@ defmodule FlowStone.Scatter do
         p -> Partition.serialize(p)
       end
 
-    normalized_keys = Enum.map(scatter_keys, &Key.normalize/1)
-
     attrs = %{
       run_id: run_id,
       asset_name: to_string(asset_name),
       scatter_source_asset: opts[:scatter_source_asset] && to_string(opts[:scatter_source_asset]),
       partition: partition,
-      total_count: length(normalized_keys),
-      scatter_keys: normalized_keys,
+      total_count: 0,
+      scatter_keys: [],
       options: Options.to_map(scatter_opts),
       metadata: Keyword.get(opts, :metadata, %{}),
-      status: :executing
+      status: :executing,
+      mode: Keyword.get(opts, :mode, scatter_opts.mode),
+      reader_checkpoint: Keyword.get(opts, :reader_checkpoint),
+      parent_barrier_id: Keyword.get(opts, :parent_barrier_id),
+      batch_index: Keyword.get(opts, :batch_index)
     }
 
+    emit_start? = Keyword.get(opts, :emit_start, true)
+
     Repo.transaction(fn ->
-      # Create barrier
       barrier =
         %Barrier{}
         |> Barrier.changeset(attrs)
         |> Repo.insert!()
 
-      # Create result records for each scatter key
+      if emit_start? do
+        emit_telemetry(:start, barrier)
+      end
+
+      barrier
+    end)
+  end
+
+  @doc """
+  Insert scatter results for a barrier and increment total_count.
+  """
+  @spec insert_results(barrier() | Ecto.UUID.t(), [scatter_key()]) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def insert_results(barrier_or_id, scatter_keys) do
+    barrier_id = get_barrier_id(barrier_or_id)
+    normalized = Enum.map(scatter_keys, &Key.normalize/1)
+
+    keys_with_hash =
+      normalized
+      |> Enum.map(&{&1, Key.hash(&1)})
+      |> Enum.reduce({MapSet.new(), []}, fn {key, hash}, {seen, acc} ->
+        if MapSet.member?(seen, hash) do
+          {seen, acc}
+        else
+          {MapSet.put(seen, hash), [{key, hash} | acc]}
+        end
+      end)
+      |> elem(1)
+      |> Enum.reverse()
+
+    Repo.transaction(fn ->
+      barrier = Repo.get!(Barrier, barrier_id, lock: "FOR UPDATE")
+      start_index = barrier.total_count
       now = DateTime.utc_now()
 
       result_records =
-        normalized_keys
-        |> Enum.with_index()
-        |> Enum.map(fn {key, index} ->
+        keys_with_hash
+        |> Enum.with_index(start_index)
+        |> Enum.map(fn {{key, hash}, index} ->
           %{
             id: Ecto.UUID.generate(),
-            barrier_id: barrier.id,
-            scatter_key_hash: Key.hash(key),
+            barrier_id: barrier_id,
+            scatter_key_hash: hash,
             scatter_key: key,
             scatter_index: index,
             status: :pending,
@@ -108,12 +158,620 @@ defmodule FlowStone.Scatter do
           }
         end)
 
-      Repo.insert_all(Result, result_records)
+      {inserted_count, _} =
+        Repo.insert_all(Result, result_records,
+          on_conflict: :nothing,
+          conflict_target: [:barrier_id, :scatter_key_hash]
+        )
 
-      emit_telemetry(:start, barrier)
+      from(b in Barrier, where: b.id == ^barrier_id)
+      |> Repo.update_all(inc: [total_count: inserted_count], set: [updated_at: now])
 
-      barrier
+      inserted_count
     end)
+  end
+
+  @doc """
+  Run an ItemReader in inline mode and stream results into a single barrier.
+  """
+  @spec run_inline_reader(FlowStone.Asset.t(), map(), keyword()) ::
+          {:ok, barrier()} | {:error, Error.t()}
+  def run_inline_reader(asset, deps, opts) do
+    run_reader(:inline, asset, deps, opts)
+  end
+
+  @doc """
+  Run an ItemReader in distributed mode, creating sub-barriers per batch.
+  """
+  @spec run_distributed_reader(FlowStone.Asset.t(), map(), keyword()) ::
+          {:ok, barrier()} | {:error, Error.t()}
+  def run_distributed_reader(asset, deps, opts) do
+    run_reader(:distributed, asset, deps, opts)
+  end
+
+  @doc """
+  Start a distributed ItemReader run using a worker when Oban is running.
+  """
+  @spec start_distributed_reader(FlowStone.Asset.t(), map(), keyword()) ::
+          {:ok, barrier()} | {:error, Error.t()}
+  def start_distributed_reader(asset, deps, opts) do
+    run_id = Keyword.fetch!(opts, :run_id)
+    partition = Keyword.get(opts, :partition)
+    scatter_opts = scatter_options_from_asset(asset, Keyword.put(opts, :mode, :distributed))
+
+    with :ok <- ensure_item_reader_asset(asset, :distributed),
+         {:ok, barrier} <-
+           start_barrier(
+             run_id: run_id,
+             asset_name: asset.name,
+             partition: partition,
+             options: scatter_opts,
+             mode: :distributed
+           ) do
+      if oban_running?() and Keyword.get(opts, :enqueue_reader, true) do
+        args = %{
+          "barrier_id" => barrier.id,
+          "run_id" => run_id,
+          "asset_name" => to_string(asset.name),
+          "partition" => Partition.serialize(partition)
+        }
+
+        ItemReaderWorker.new(args, queue: scatter_opts.queue, priority: scatter_opts.priority)
+        |> Oban.insert()
+
+        {:ok, barrier}
+      else
+        run_distributed_reader(asset, deps, Keyword.put(opts, :barrier_id, barrier.id))
+      end
+    end
+  end
+
+  defp run_reader(mode, asset, deps, opts) do
+    run_id = Keyword.fetch!(opts, :run_id)
+    partition = Keyword.get(opts, :partition)
+
+    with :ok <- ensure_item_reader_asset(asset, mode),
+         scatter_opts <- scatter_options_from_asset(asset, Keyword.put(opts, :mode, mode)),
+         {:ok, barrier} <-
+           get_or_start_barrier(asset, run_id, partition, scatter_opts, mode, opts),
+         {:ok, reader_mod, reader_state, reader_config} <-
+           init_reader(asset, deps, barrier, mode, opts) do
+      case mode do
+        :inline ->
+          stream_inline(
+            reader_mod,
+            reader_state,
+            reader_config,
+            asset,
+            deps,
+            barrier,
+            scatter_opts,
+            opts
+          )
+
+        :distributed ->
+          stream_distributed(
+            reader_mod,
+            reader_state,
+            reader_config,
+            asset,
+            deps,
+            barrier,
+            scatter_opts,
+            opts
+          )
+      end
+    end
+  end
+
+  defp ensure_item_reader_asset(asset, mode) do
+    cond do
+      is_nil(asset.scatter_source) ->
+        {:error, Error.validation_error(asset.name, "scatter_from is required for #{mode} mode")}
+
+      not is_function(asset.item_selector_fn, 2) ->
+        {:error, Error.validation_error(asset.name, "item_selector/2 is required")}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp get_or_start_barrier(asset, run_id, partition, scatter_opts, mode, opts) do
+    case Keyword.get(opts, :barrier_id) do
+      nil ->
+        start_barrier(
+          run_id: run_id,
+          asset_name: asset.name,
+          partition: partition,
+          options: scatter_opts,
+          mode: mode
+        )
+
+      barrier_id ->
+        case Repo.get(Barrier, barrier_id) do
+          nil ->
+            {:error,
+             Error.validation_error(asset.name, "scatter barrier not found: #{barrier_id}")}
+
+          barrier ->
+            {:ok, barrier}
+        end
+    end
+  end
+
+  defp init_reader(asset, deps, barrier, mode, opts) do
+    reader_mod = ItemReader.resolve(asset.scatter_source)
+
+    config =
+      resolve_config(asset.scatter_source_config || %{}, deps,
+        skip_keys: [:init, :read, :count, :checkpoint, :restore, :close, :row_selector]
+      )
+
+    meta = %{
+      asset: asset.name,
+      run_id: barrier.run_id,
+      mode: mode,
+      source: asset.scatter_source
+    }
+
+    start_time = System.monotonic_time(:millisecond)
+
+    case reader_mod.init(config, deps) do
+      {:ok, state} ->
+        duration = System.monotonic_time(:millisecond) - start_time
+        emit_item_reader(:init, %{duration: duration}, meta)
+        state = maybe_restore(reader_mod, state, barrier.reader_checkpoint)
+        {:ok, reader_mod, state, config}
+
+      {:error, reason} ->
+        duration = System.monotonic_time(:millisecond) - start_time
+        emit_item_reader(:error, %{duration: duration}, Map.put(meta, :error, reason))
+        update_barrier_status(barrier, :failed)
+        {:error, reader_error(asset, opts, reason)}
+    end
+  end
+
+  defp stream_inline(
+         reader_mod,
+         state,
+         config,
+         %{item_selector_fn: item_selector} = asset,
+         deps,
+         barrier,
+         scatter_opts,
+         opts
+       )
+       when is_function(item_selector, 2) do
+    batch_size = resolve_batch_size(scatter_opts, config, reader_mod)
+    max_batches = scatter_opts.max_batches
+    max_items = config[:max_items]
+
+    ctx = %{
+      reader_mod: reader_mod,
+      asset: asset,
+      deps: deps,
+      barrier: barrier,
+      scatter_opts: scatter_opts,
+      opts: opts,
+      item_selector: item_selector,
+      batch_size: batch_size,
+      max_batches: max_batches,
+      max_items: max_items
+    }
+
+    result = read_loop(ctx, state, 0, 0)
+
+    case result do
+      {:ok, final_state, :complete} ->
+        reader_mod.close(final_state)
+        emit_item_reader(:complete, %{}, %{asset: asset.name, run_id: barrier.run_id})
+        {:ok, Repo.get!(Barrier, barrier.id)}
+
+      {:ok, final_state, :paused} ->
+        reader_mod.close(final_state)
+        {:ok, Repo.get!(Barrier, barrier.id)}
+
+      {:error, %Error{} = err} ->
+        {:error, err}
+    end
+  end
+
+  defp stream_inline(
+         _reader_mod,
+         _state,
+         _config,
+         asset,
+         _deps,
+         _barrier,
+         _scatter_opts,
+         _opts
+       ) do
+    {:error, Error.validation_error(asset.name, "item_selector/2 is required")}
+  end
+
+  defp read_loop(ctx, state, batch_index, total_read) do
+    cond do
+      batch_limit_reached?(ctx, batch_index) ->
+        {:ok, state, :paused}
+
+      item_limit_reached?(ctx, total_read) ->
+        {:ok, state, :complete}
+
+      true ->
+        read_inline_batch(ctx, state, batch_index, total_read)
+    end
+  end
+
+  defp read_inline_batch(ctx, state, batch_index, total_read) do
+    start_time = System.monotonic_time(:millisecond)
+
+    case safe_reader_read(ctx.reader_mod, state, ctx.batch_size) do
+      {:ok, items, next_state} ->
+        process_inline_items(ctx, state, next_state, items, batch_index, total_read, start_time)
+
+      {:error, reason} ->
+        handle_reader_error(ctx, state, reason)
+    end
+  end
+
+  defp process_inline_items(ctx, state, next_state, items, batch_index, total_read, start_time) do
+    {items, reached_limit?} = apply_max_items(items, total_read, ctx.max_items)
+    new_total = total_read + length(items)
+    duration = System.monotonic_time(:millisecond) - start_time
+
+    emit_item_reader(:read, %{duration: duration, count: length(items)}, %{
+      asset: ctx.asset.name,
+      run_id: ctx.barrier.run_id,
+      batch_index: batch_index
+    })
+
+    with {:ok, scatter_keys} <- safe_select(ctx.item_selector, items, ctx.deps),
+         {:ok, _count} <- insert_results(ctx.barrier.id, scatter_keys) do
+      maybe_enqueue(ctx.barrier, ctx.asset, scatter_keys, ctx.scatter_opts, ctx.opts)
+
+      checkpoint = ctx.reader_mod.checkpoint(state_for_checkpoint(state, next_state))
+      update_reader_checkpoint(ctx.barrier.id, checkpoint)
+
+      if done_reading?(items, reached_limit?, next_state) do
+        {:ok, state_for_checkpoint(state, next_state), :complete}
+      else
+        read_loop(ctx, next_state, batch_index + 1, new_total)
+      end
+    else
+      {:error, reason} ->
+        handle_reader_error(ctx, state, reason)
+    end
+  end
+
+  defp stream_distributed(
+         reader_mod,
+         state,
+         config,
+         %{item_selector_fn: item_selector} = asset,
+         deps,
+         parent_barrier,
+         scatter_opts,
+         opts
+       )
+       when is_function(item_selector, 2) do
+    batch_size = resolve_batch_size(scatter_opts, config, reader_mod)
+    max_batches = scatter_opts.max_batches
+    max_items = config[:max_items]
+
+    ctx = %{
+      reader_mod: reader_mod,
+      asset: asset,
+      deps: deps,
+      barrier: parent_barrier,
+      scatter_opts: scatter_opts,
+      opts: opts,
+      item_selector: item_selector,
+      batch_size: batch_size,
+      max_batches: max_batches,
+      max_items: max_items
+    }
+
+    result = distributed_loop(ctx, state, 0, 0)
+
+    case result do
+      {:ok, final_state, :complete} ->
+        reader_mod.close(final_state)
+        emit_item_reader(:complete, %{}, %{asset: asset.name, run_id: parent_barrier.run_id})
+        {:ok, Repo.get!(Barrier, parent_barrier.id)}
+
+      {:ok, final_state, :paused} ->
+        reader_mod.close(final_state)
+        {:ok, Repo.get!(Barrier, parent_barrier.id)}
+
+      {:error, %Error{} = err} ->
+        {:error, err}
+    end
+  end
+
+  defp stream_distributed(
+         _reader_mod,
+         _state,
+         _config,
+         asset,
+         _deps,
+         _parent,
+         _scatter_opts,
+         _opts
+       ) do
+    {:error, Error.validation_error(asset.name, "item_selector/2 is required")}
+  end
+
+  defp distributed_loop(ctx, state, batch_index, total_read) do
+    cond do
+      batch_limit_reached?(ctx, batch_index) ->
+        {:ok, state, :paused}
+
+      item_limit_reached?(ctx, total_read) ->
+        {:ok, state, :complete}
+
+      true ->
+        read_distributed_batch(ctx, state, batch_index, total_read)
+    end
+  end
+
+  defp read_distributed_batch(ctx, state, batch_index, total_read) do
+    start_time = System.monotonic_time(:millisecond)
+
+    case safe_reader_read(ctx.reader_mod, state, ctx.batch_size) do
+      {:ok, items, next_state} ->
+        process_distributed_items(
+          ctx,
+          state,
+          next_state,
+          items,
+          batch_index,
+          total_read,
+          start_time
+        )
+
+      {:error, reason} ->
+        handle_reader_error(ctx, state, reason)
+    end
+  end
+
+  defp process_distributed_items(
+         ctx,
+         state,
+         next_state,
+         items,
+         batch_index,
+         total_read,
+         start_time
+       ) do
+    {items, reached_limit?} = apply_max_items(items, total_read, ctx.max_items)
+    new_total = total_read + length(items)
+    duration = System.monotonic_time(:millisecond) - start_time
+
+    emit_item_reader(:read, %{duration: duration, count: length(items)}, %{
+      asset: ctx.asset.name,
+      run_id: ctx.barrier.run_id,
+      batch_index: batch_index
+    })
+
+    with {:ok, scatter_keys} <- safe_select(ctx.item_selector, items, ctx.deps),
+         :ok <- handle_distributed_batch(ctx, scatter_keys, batch_index) do
+      checkpoint = ctx.reader_mod.checkpoint(state_for_checkpoint(state, next_state))
+      update_reader_checkpoint(ctx.barrier.id, checkpoint)
+
+      if done_reading?(items, reached_limit?, next_state) do
+        {:ok, state_for_checkpoint(state, next_state), :complete}
+      else
+        distributed_loop(ctx, next_state, batch_index + 1, new_total)
+      end
+    else
+      {:error, reason} ->
+        handle_reader_error(ctx, state, reason)
+    end
+  end
+
+  defp handle_distributed_batch(_ctx, [], _batch_index), do: :ok
+
+  defp handle_distributed_batch(ctx, scatter_keys, batch_index) do
+    emit_batch_event(:batch_start, ctx.barrier, batch_index, length(scatter_keys))
+
+    child_opts = %{ctx.scatter_opts | mode: :inline}
+
+    case create_barrier(
+           run_id: ctx.barrier.run_id,
+           asset_name: ctx.asset.name,
+           partition: Partition.deserialize(ctx.barrier.partition),
+           scatter_keys: scatter_keys,
+           options: child_opts,
+           parent_barrier_id: ctx.barrier.id,
+           batch_index: batch_index
+         ) do
+      {:ok, child_barrier} ->
+        increment_total_count(ctx.barrier.id, child_barrier.total_count)
+
+        maybe_enqueue(child_barrier, ctx.asset, scatter_keys, ctx.scatter_opts, ctx.opts)
+        emit_batch_event(:batch_complete, ctx.barrier, batch_index, child_barrier.total_count)
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp batch_limit_reached?(%{max_batches: nil}, _batch_index), do: false
+  defp batch_limit_reached?(%{max_batches: max}, batch_index), do: batch_index >= max
+
+  defp item_limit_reached?(%{max_items: nil}, _total_read), do: false
+  defp item_limit_reached?(%{max_items: max}, total_read), do: total_read >= max
+
+  defp done_reading?(items, reached_limit?, next_state) do
+    reached_limit? or next_state == :halt or items == []
+  end
+
+  defp handle_reader_error(ctx, state, reason) do
+    update_barrier_status(ctx.barrier, :failed)
+    ctx.reader_mod.close(state)
+
+    emit_item_reader(:error, %{}, %{
+      asset: ctx.asset.name,
+      run_id: ctx.barrier.run_id,
+      error: reason
+    })
+
+    {:error, reader_error(ctx.asset, ctx.opts, reason)}
+  end
+
+  defp resolve_batch_size(scatter_opts, config, _reader_mod) do
+    case {scatter_opts.batch_size, config[:reader_batch_size]} do
+      {nil, nil} -> 1000
+      {nil, size} -> size
+      {size, nil} -> size
+      {size, cap} -> min(size, cap)
+    end
+  end
+
+  defp apply_max_items(items, _total_read, nil), do: {items, false}
+
+  defp apply_max_items(items, total_read, max_items) do
+    remaining = max_items - total_read
+
+    cond do
+      remaining <= 0 -> {[], true}
+      length(items) > remaining -> {Enum.take(items, remaining), true}
+      true -> {items, false}
+    end
+  end
+
+  defp state_for_checkpoint(state, :halt), do: state
+  defp state_for_checkpoint(_state, next_state), do: next_state
+
+  defp maybe_restore(_reader_mod, state, nil), do: state
+
+  defp maybe_restore(reader_mod, state, checkpoint) when is_map(checkpoint) do
+    reader_mod.restore(state, checkpoint)
+  end
+
+  defp update_reader_checkpoint(barrier_id, checkpoint) do
+    from(b in Barrier, where: b.id == ^barrier_id)
+    |> Repo.update_all(set: [reader_checkpoint: checkpoint, updated_at: DateTime.utc_now()])
+
+    :ok
+  end
+
+  defp increment_total_count(barrier_id, count) do
+    from(b in Barrier, where: b.id == ^barrier_id)
+    |> Repo.update_all(inc: [total_count: count], set: [updated_at: DateTime.utc_now()])
+  end
+
+  defp scatter_options_from_asset(asset, opts) do
+    base = normalize_options(Map.get(asset, :scatter_options) || %Options{})
+    overrides = opts |> Enum.into(%{}) |> Map.take(Map.keys(Map.from_struct(base)))
+    struct(base, overrides)
+  end
+
+  defp normalize_options(%Options{} = opts), do: opts
+  defp normalize_options(nil), do: Options.new()
+  defp normalize_options(opts) when is_list(opts), do: Options.new(opts)
+  defp normalize_options(opts) when is_map(opts), do: Options.new(Map.to_list(opts))
+
+  defp resolve_config(config, deps, opts) do
+    skip_keys = Keyword.get(opts, :skip_keys, [])
+
+    Enum.reduce(config, %{}, fn {key, value}, acc ->
+      Map.put(acc, key, resolve_value(key, value, deps, skip_keys))
+    end)
+  end
+
+  defp resolve_value(key, value, deps, skip_keys) when is_function(value) do
+    if key in skip_keys do
+      value
+    else
+      resolve_function_value(value, deps)
+    end
+  end
+
+  defp resolve_value(_key, value, _deps, _skip_keys), do: value
+
+  defp resolve_function_value(value, deps) when is_function(value, 1), do: value.(deps)
+  defp resolve_function_value(value, _deps) when is_function(value, 0), do: value.()
+  defp resolve_function_value(value, _deps), do: value
+
+  defp safe_reader_read(reader_mod, state, batch_size) do
+    reader_mod.read(state, batch_size)
+  rescue
+    exception -> {:error, exception}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp safe_select(item_selector, items, deps) do
+    keys = Enum.map(items, &item_selector.(&1, deps))
+
+    case Enum.find(keys, fn key -> not is_map(key) end) do
+      nil -> {:ok, keys}
+      invalid -> {:error, {:invalid_scatter_key, invalid}}
+    end
+  rescue
+    exception -> {:error, exception}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp maybe_enqueue(barrier, asset, scatter_keys, scatter_opts, opts) do
+    cond do
+      Keyword.get(opts, :enqueue, true) == false -> :ok
+      not oban_running?() -> :ok
+      true -> enqueue_scatter_jobs(barrier, asset, scatter_keys, scatter_opts)
+    end
+  end
+
+  defp enqueue_scatter_jobs(barrier, asset, scatter_keys, scatter_opts) do
+    Enum.each(scatter_keys, fn scatter_key ->
+      args = %{
+        "barrier_id" => barrier.id,
+        "scatter_key" => scatter_key,
+        "asset_name" => to_string(asset.name),
+        "run_id" => barrier.run_id
+      }
+
+      ScatterWorker.new(args, queue: scatter_opts.queue, priority: scatter_opts.priority)
+      |> Oban.insert()
+    end)
+
+    :ok
+  end
+
+  defp oban_running? do
+    Process.whereis(Oban.Registry) != nil and Process.whereis(Oban.Config) != nil
+  end
+
+  defp reader_error(asset, opts, reason) do
+    partition = Keyword.get(opts, :partition)
+    Error.execution_error(asset.name, partition, wrap_reason(reason), [])
+  end
+
+  defp wrap_reason(reason) when is_binary(reason), do: %RuntimeError{message: reason}
+
+  defp wrap_reason(reason) when is_atom(reason),
+    do: %RuntimeError{message: Atom.to_string(reason)}
+
+  defp wrap_reason(reason), do: %RuntimeError{message: inspect(reason)}
+
+  defp emit_item_reader(event, measurements, meta) do
+    :telemetry.execute([:flowstone, :item_reader, event], measurements, meta)
+  end
+
+  defp emit_batch_event(event, parent_barrier, batch_index, count) do
+    :telemetry.execute(
+      [:flowstone, :scatter, event],
+      %{count: count},
+      %{
+        parent_barrier_id: parent_barrier.id,
+        asset: parent_barrier.asset_name,
+        run_id: parent_barrier.run_id,
+        batch_index: batch_index
+      }
+    )
   end
 
   @doc """

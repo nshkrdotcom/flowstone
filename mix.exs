@@ -77,6 +77,7 @@ defmodule FlowStone.MixProject do
       # AWS/S3 support
       {:ex_aws, "~> 2.5", optional: true},
       {:ex_aws_s3, "~> 2.5", optional: true},
+      {:ex_aws_dynamo, "~> 4.2", optional: true},
 
       # Testing
       {:supertester, "~> 0.3.1", only: :test},

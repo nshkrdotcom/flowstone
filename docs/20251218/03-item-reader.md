@@ -54,6 +54,8 @@ asset :fetch_web_artifacts do
     mode :distributed
     max_concurrent 50
     failure_threshold 0.5
+    batch_size 1000
+    max_batches 50
   end
 
   execute fn ctx, _deps ->
@@ -61,6 +63,17 @@ asset :fetch_web_artifacts do
   end
 end
 ```
+
+### 3.1 Source Config Macros
+
+`scatter_from` accepts source-specific config macros (all values can be literals or `fn deps -> ... end`):
+
+- **S3**: `bucket`, `prefix`, `start_after`, `suffix`, `reader_batch_size`, `max_items`, `consistency_delay_ms`
+- **DynamoDB**: `table`, `index`, `key_condition`, `filter_expression`, `expression_attribute_values`,
+  `expression_attribute_names`, `projection_expression`, `consistent_read`, `reader_batch_size`, `max_items`
+- **Postgres**: `query`, `cursor_field`, `order`, `start_after`, `row_selector`, `repo`,
+  `reader_batch_size`, `max_items`
+- **Custom**: `init`, `read` (required); `count`, `checkpoint`, `restore`, `close` (optional)
 
 ## 4. ItemReader Behavior
 
@@ -97,6 +110,8 @@ All state must be JSON-serializable via `checkpoint/1`.
 - A reader worker reads pages and creates sub-barriers per batch.
 - Each batch enqueues scatter jobs for its items.
 - Reader checkpoints are stored on the parent barrier.
+- `FlowStone.Scatter.start_distributed_reader/3` creates the parent barrier and enqueues
+  `FlowStone.Workers.ItemReaderWorker` when Oban is running.
 
 ## 6. Asset Struct Changes
 
@@ -115,11 +130,13 @@ defstruct [
 - `flowstone_scatter_barriers` stores counts, status, and reader checkpoint.
 - `flowstone_scatter_results` stores scatter keys and per-item status.
 - Large runs avoid storing all keys in the barrier record.
+- Barrier uniqueness by `{run_id, asset_name, partition}` is removed to allow multiple sub-barriers.
+- `FlowStone.Scatter.start_barrier/1` and `FlowStone.Scatter.insert_results/2` support streaming inserts.
 
 ```elixir
 alter table(:flowstone_scatter_barriers) do
   add :mode, :string, default: "inline"
-  add :reader_checkpoint, :map
+  add :reader_checkpoint, :jsonb
   add :parent_barrier_id, references(:flowstone_scatter_barriers, type: :uuid)
   add :batch_index, :integer
 end
@@ -133,16 +150,18 @@ end
 - Caps `max_keys` at 1000 per request.
 - Supports `start_after` and `suffix` filters.
 - Optional `consistency_delay_ms` to avoid eventual consistency gaps.
+- Raises a clear error on init if `ex_aws_s3` is not available.
 
 ### 8.2 DynamoDB
 
 - Uses `scan` or `query` based on `key_condition`.
 - Requires `ex_aws_dynamo` as an optional dependency.
+- Raises a clear error on init if `ex_aws_dynamo` is not available.
 
 ### 8.3 Postgres
 
-- Uses keyset pagination or a stream within a single coordinator process.
-- For distributed mode, only the coordinator performs reads to avoid pool exhaustion.
+- Uses keyset pagination with `cursor_field` and `order`.
+- Supports `row_selector` to map rows into item maps.
 
 ### 8.4 Custom
 
@@ -209,4 +228,3 @@ When `compatibility_mode: :step_functions` is enabled, defaults are:
 - Pagination tests for each reader.
 - Resume tests using stored checkpoints.
 - Large-run tests to verify memory behavior.
-

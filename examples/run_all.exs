@@ -16,6 +16,7 @@ example_files = [
   "parallel_branches_example.exs",
   # v0.3.0 - New features
   "scatter_example.exs",
+  "item_reader_example.exs",
   "signal_gate_example.exs",
   "rate_limiter_example.exs"
 ]

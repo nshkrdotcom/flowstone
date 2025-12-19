@@ -17,6 +17,15 @@ defmodule FlowStone.Telemetry do
   - `[:flowstone, :scatter, :instance_complete]` - Single scatter instance completed
   - `[:flowstone, :scatter, :instance_fail]` - Single scatter instance failed
   - `[:flowstone, :scatter, :gather_ready]` - Scatter ready for downstream gather
+  - `[:flowstone, :scatter, :batch_start]` - Reader batch started (distributed)
+  - `[:flowstone, :scatter, :batch_complete]` - Reader batch completed (distributed)
+
+  ## ItemReader Events
+
+  - `[:flowstone, :item_reader, :init]` - ItemReader initialized
+  - `[:flowstone, :item_reader, :read]` - ItemReader batch read
+  - `[:flowstone, :item_reader, :complete]` - ItemReader finished
+  - `[:flowstone, :item_reader, :error]` - ItemReader error
 
   ## Signal Gate Events
 
@@ -77,6 +86,12 @@ defmodule FlowStone.Telemetry do
     [:flowstone, :scatter, :instance_complete],
     [:flowstone, :scatter, :instance_fail],
     [:flowstone, :scatter, :gather_ready],
+    [:flowstone, :scatter, :batch_start],
+    [:flowstone, :scatter, :batch_complete],
+    [:flowstone, :item_reader, :init],
+    [:flowstone, :item_reader, :read],
+    [:flowstone, :item_reader, :complete],
+    [:flowstone, :item_reader, :error],
     # Signal Gate
     [:flowstone, :signal_gate, :create],
     [:flowstone, :signal_gate, :signal],

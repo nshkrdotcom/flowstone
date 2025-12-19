@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parallel telemetry events: `[:flowstone, :parallel, :start | :stop | :error | :branch_start | :branch_complete | :branch_fail]`
 - Example `parallel_branches_example.exs` and updated docs/README sections
 - Migration `0010_create_parallel_tables.exs`
+- ItemReader DSL: `scatter_from`, `item_selector`, source config macros, and reader options (`mode`, `batch_size`, `max_batches`)
+- `FlowStone.Scatter.ItemReader` behavior with built-in readers (S3, DynamoDB, Postgres, Custom)
+- `FlowStone.Workers.ItemReaderWorker` for distributed reader execution
+- Telemetry events for ItemReader and distributed scatter batches
+- Example `item_reader_example.exs` and ItemReader docs/README sections
+- Migration `0011_add_item_reader_fields.exs`
 
 ### Changed
 
@@ -29,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DAG validation enforces routed_from router assets, optional_deps subset, and implicit router edges
 - Executor handles parallel pending results without storing IO; join worker records final materializations
 - DAG adds virtual edges from parallel assets to branch finals; lineage includes branch finals on join
+- Scatter barriers no longer store scatter keys; keys are stored in `flowstone_scatter_results` only
+- Scatter barriers allow `total_count` to start at 0 for streaming readers
 
 ## [0.3.0] - 2025-12-18
 

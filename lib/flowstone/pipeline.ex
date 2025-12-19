@@ -257,6 +257,29 @@ defmodule FlowStone.Pipeline do
   end
 
   @doc """
+  Define a scatter source using an ItemReader.
+  """
+  defmacro scatter_from(source, do: block) do
+    quote do
+      var!(scatter_source_config) = %{}
+      var!(current_asset) = %{var!(current_asset) | scatter_source: unquote(source)}
+      unquote(block)
+
+      var!(current_asset) =
+        %{var!(current_asset) | scatter_source_config: var!(scatter_source_config)}
+    end
+  end
+
+  @doc """
+  Define an item selector for ItemReader outputs.
+  """
+  defmacro item_selector(fun) do
+    quote do
+      var!(current_asset) = %{var!(current_asset) | item_selector_fn: unquote(fun)}
+    end
+  end
+
+  @doc """
   Configure scatter execution options.
 
   ## Available Options
@@ -270,6 +293,9 @@ defmodule FlowStone.Pipeline do
   - `queue` - Oban queue for scatter jobs
   - `priority` - Job priority (0-3)
   - `timeout` - Per-instance timeout in milliseconds
+  - `mode` - `:inline` or `:distributed` for ItemReader execution
+  - `batch_size` - ItemReader batch size
+  - `max_batches` - Max ItemReader batches per run
 
   ## Example
 
@@ -284,13 +310,54 @@ defmodule FlowStone.Pipeline do
     quote do
       var!(scatter_opts) = %{}
       unquote(block)
-      var!(current_asset) = %{var!(current_asset) | scatter_options: var!(scatter_opts)}
+
+      var!(current_asset) = %{
+        var!(current_asset)
+        | scatter_options: var!(scatter_opts),
+          scatter_mode: Map.get(var!(scatter_opts), :mode)
+      }
+    end
+  end
+
+  defmacro mode(value) do
+    env = __CALLER__
+
+    if Macro.Env.has_var?(env, {:scatter_opts, nil}) do
+      quote do
+        var!(scatter_opts) = Map.put(var!(scatter_opts), :mode, unquote(value))
+      end
+    else
+      raise ArgumentError, "mode must be used inside scatter_options"
     end
   end
 
   defmacro max_concurrent(value) do
     quote do
       var!(scatter_opts) = Map.put(var!(scatter_opts), :max_concurrent, unquote(value))
+    end
+  end
+
+  defmacro batch_size(value) do
+    env = __CALLER__
+
+    if Macro.Env.has_var?(env, {:scatter_opts, nil}) do
+      quote do
+        var!(scatter_opts) = Map.put(var!(scatter_opts), :batch_size, unquote(value))
+      end
+    else
+      raise ArgumentError, "batch_size must be used inside scatter_options"
+    end
+  end
+
+  defmacro max_batches(value) do
+    env = __CALLER__
+
+    if Macro.Env.has_var?(env, {:scatter_opts, nil}) do
+      quote do
+        var!(scatter_opts) = Map.put(var!(scatter_opts), :max_batches, unquote(value))
+      end
+    else
+      raise ArgumentError, "max_batches must be used inside scatter_options"
     end
   end
 
@@ -427,6 +494,233 @@ defmodule FlowStone.Pipeline do
   defmacro on_timeout(fun) do
     quote do
       var!(current_asset) = %{var!(current_asset) | on_timeout_fn: unquote(fun)}
+    end
+  end
+
+  defmacro bucket(value) do
+    ensure_scatter_from!(__CALLER__, "bucket")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :bucket, unquote(value))
+    end
+  end
+
+  defmacro prefix(value) do
+    ensure_scatter_from!(__CALLER__, "prefix")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :prefix, unquote(value))
+    end
+  end
+
+  defmacro start_after(value) do
+    ensure_scatter_from!(__CALLER__, "start_after")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :start_after, unquote(value))
+    end
+  end
+
+  defmacro suffix(value) do
+    ensure_scatter_from!(__CALLER__, "suffix")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :suffix, unquote(value))
+    end
+  end
+
+  defmacro max_items(value) do
+    ensure_scatter_from!(__CALLER__, "max_items")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :max_items, unquote(value))
+    end
+  end
+
+  defmacro reader_batch_size(value) do
+    ensure_scatter_from!(__CALLER__, "reader_batch_size")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :reader_batch_size, unquote(value))
+    end
+  end
+
+  defmacro consistency_delay_ms(value) do
+    ensure_scatter_from!(__CALLER__, "consistency_delay_ms")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :consistency_delay_ms, unquote(value))
+    end
+  end
+
+  defmacro table(value) do
+    ensure_scatter_from!(__CALLER__, "table")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :table, unquote(value))
+    end
+  end
+
+  defmacro index(value) do
+    ensure_scatter_from!(__CALLER__, "index")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :index, unquote(value))
+    end
+  end
+
+  defmacro key_condition(value) do
+    ensure_scatter_from!(__CALLER__, "key_condition")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :key_condition, unquote(value))
+    end
+  end
+
+  defmacro filter_expression(value) do
+    ensure_scatter_from!(__CALLER__, "filter_expression")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :filter_expression, unquote(value))
+    end
+  end
+
+  defmacro projection_expression(value) do
+    ensure_scatter_from!(__CALLER__, "projection_expression")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :projection_expression, unquote(value))
+    end
+  end
+
+  defmacro expression_attribute_values(value) do
+    ensure_scatter_from!(__CALLER__, "expression_attribute_values")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :expression_attribute_values, unquote(value))
+    end
+  end
+
+  defmacro expression_attribute_names(value) do
+    ensure_scatter_from!(__CALLER__, "expression_attribute_names")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :expression_attribute_names, unquote(value))
+    end
+  end
+
+  defmacro consistent_read(value) do
+    ensure_scatter_from!(__CALLER__, "consistent_read")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :consistent_read, unquote(value))
+    end
+  end
+
+  defmacro query(value) do
+    ensure_scatter_from!(__CALLER__, "query")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :query, unquote(value))
+    end
+  end
+
+  defmacro cursor_field(value) do
+    ensure_scatter_from!(__CALLER__, "cursor_field")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :cursor_field, unquote(value))
+    end
+  end
+
+  defmacro order(value) do
+    ensure_scatter_from!(__CALLER__, "order")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :order, unquote(value))
+    end
+  end
+
+  defmacro row_selector(value) do
+    ensure_scatter_from!(__CALLER__, "row_selector")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :row_selector, unquote(value))
+    end
+  end
+
+  defmacro repo(value) do
+    ensure_scatter_from!(__CALLER__, "repo")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :repo, unquote(value))
+    end
+  end
+
+  defmacro init(value) do
+    ensure_scatter_from!(__CALLER__, "init")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :init, unquote(value))
+    end
+  end
+
+  defmacro read(value) do
+    ensure_scatter_from!(__CALLER__, "read")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :read, unquote(value))
+    end
+  end
+
+  defmacro count(value) do
+    ensure_scatter_from!(__CALLER__, "count")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :count, unquote(value))
+    end
+  end
+
+  defmacro checkpoint(value) do
+    ensure_scatter_from!(__CALLER__, "checkpoint")
+
+    quote do
+      var!(scatter_source_config) =
+        Map.put(var!(scatter_source_config), :checkpoint, unquote(value))
+    end
+  end
+
+  defmacro restore(value) do
+    ensure_scatter_from!(__CALLER__, "restore")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :restore, unquote(value))
+    end
+  end
+
+  defmacro close(value) do
+    ensure_scatter_from!(__CALLER__, "close")
+
+    quote do
+      var!(scatter_source_config) = Map.put(var!(scatter_source_config), :close, unquote(value))
+    end
+  end
+
+  defp ensure_scatter_from!(env, name) do
+    unless Macro.Env.has_var?(env, {:scatter_source_config, nil}) do
+      raise ArgumentError, "#{name} must be used inside scatter_from"
     end
   end
 end

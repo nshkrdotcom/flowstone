@@ -15,7 +15,10 @@ defmodule FlowStone.Scatter.Options do
           max_attempts: pos_integer(),
           queue: atom(),
           priority: 0..3,
-          timeout: pos_integer() | :infinity
+          timeout: pos_integer() | :infinity,
+          mode: :inline | :distributed,
+          batch_size: pos_integer() | nil,
+          max_batches: pos_integer() | nil
         }
 
   defstruct max_concurrent: :unlimited,
@@ -26,7 +29,10 @@ defmodule FlowStone.Scatter.Options do
             max_attempts: 3,
             queue: :flowstone_scatter,
             priority: 1,
-            timeout: :timer.minutes(30)
+            timeout: :timer.minutes(30),
+            mode: :inline,
+            batch_size: nil,
+            max_batches: nil
 
   @doc """
   Build options from a keyword list.
@@ -55,7 +61,10 @@ defmodule FlowStone.Scatter.Options do
       "max_attempts" => opts.max_attempts,
       "queue" => to_string(opts.queue),
       "priority" => opts.priority,
-      "timeout" => serialize_timeout(opts.timeout)
+      "timeout" => serialize_timeout(opts.timeout),
+      "mode" => to_string(opts.mode),
+      "batch_size" => opts.batch_size,
+      "max_batches" => opts.max_batches
     }
   end
 
@@ -73,7 +82,10 @@ defmodule FlowStone.Scatter.Options do
       max_attempts: map["max_attempts"] || 3,
       queue: safe_to_atom(map["queue"], :flowstone_scatter),
       priority: map["priority"] || 1,
-      timeout: deserialize_timeout(map["timeout"])
+      timeout: deserialize_timeout(map["timeout"]),
+      mode: safe_to_atom(map["mode"], :inline),
+      batch_size: map["batch_size"],
+      max_batches: map["max_batches"]
     }
   end
 

@@ -50,6 +50,16 @@ Demonstrates FlowStone's Scatter feature for parallel execution:
 MIX_ENV=dev mix run examples/scatter_example.exs
 ```
 
+### `item_reader_example.exs` — Streaming Scatter Inputs
+Demonstrates ItemReader support for Scatter:
+- Custom reader with checkpointing
+- Streaming inserts into scatter results
+- Inline execution mode without in-memory key lists
+
+```bash
+MIX_ENV=dev mix run examples/item_reader_example.exs
+```
+
 ### `signal_gate_example.exs` — Durable External Suspension
 Demonstrates FlowStone's Signal Gate feature for external task integration:
 - Zero-resource suspension while waiting for callbacks

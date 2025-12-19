@@ -259,6 +259,34 @@ asset :scraped_article do
 end
 ```
 
+### ItemReader (Streaming Scatter Inputs)
+
+Read scatter items incrementally from external sources or custom readers:
+
+```elixir
+asset :processed_items do
+  scatter_from :custom do
+    init fn _config, _deps -> {:ok, %{items: [1, 2, 3], index: 0}} end
+    read fn state, batch_size ->
+      items = Enum.drop(state.items, state.index)
+      batch = Enum.take(items, batch_size)
+      new_state = %{state | index: state.index + length(batch)}
+      if batch == [], do: {:ok, [], :halt}, else: {:ok, batch, new_state}
+    end
+  end
+
+  item_selector fn item, _deps -> %{value: item} end
+
+  scatter_options do
+    batch_size 2
+  end
+
+  execute fn ctx, _deps ->
+    {:ok, ctx.scatter_key["value"]}
+  end
+end
+```
+
 ### Signal Gate (Durable External Suspension)
 
 Zero-resource waiting for external signals (webhooks, callbacks):

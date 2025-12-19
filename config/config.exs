@@ -17,7 +17,7 @@ config :flowstone,
 
 config :flowstone, Oban,
   repo: FlowStone.Repo,
-  queues: [assets: 10, checkpoints: 5, parallel_join: 5],
+  queues: [assets: 10, checkpoints: 5, parallel_join: 5, flowstone_scatter: 10],
   plugins: [Oban.Plugins.Pruner]
 
 config :hammer,
