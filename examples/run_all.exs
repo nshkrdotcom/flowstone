@@ -8,7 +8,11 @@ example_files = [
   "telemetry_example.exs",
   "postgres_io_example.exs",
   "sensor_example.exs",
-  "failure_example.exs"
+  "failure_example.exs",
+  # v0.3.0 - New features
+  "scatter_example.exs",
+  "signal_gate_example.exs",
+  "rate_limiter_example.exs"
 ]
 
 Enum.each(example_files, fn file -> Code.require_file(file, __DIR__) end)
