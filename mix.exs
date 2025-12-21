@@ -137,24 +137,7 @@ defmodule FlowStone.MixProject do
         {"guides/configuration.md", [filename: "configuration", title: "Configuration"]},
         {"guides/testing.md", [filename: "testing", title: "Testing"]},
         # Design docs
-        "docs/design/OVERVIEW.md",
-        {"docs/adr/README.md", [filename: "adr-overview"]},
-        "docs/adr/0001-asset-first-orchestration.md",
-        "docs/adr/0002-dag-engine-persistence.md",
-        "docs/adr/0003-partitioning-isolation.md",
-        "docs/adr/0004-io-manager-abstraction.md",
-        "docs/adr/0005-checkpoint-approval-gates.md",
-        "docs/adr/0006-oban-job-execution.md",
-        "docs/adr/0007-scheduling-sensors.md",
-        "docs/adr/0008-resource-injection.md",
-        "docs/adr/0009-error-handling.md",
-        "docs/adr/0010-elixir-dsl-not-yaml.md",
-        "docs/adr/0011-observability-telemetry.md",
-        "docs/adr/0012-liveview-ui.md",
-        "docs/adr/0013-testing-strategies.md",
-        "docs/adr/0014-lineage-reporting.md",
-        "docs/adr/0015-external-integrations.md",
-        "docs/adr/0016-runtime-serialization-boundaries.md"
+        "docs/design/OVERVIEW.md"
       ],
       groups_for_extras: [
         Guides: [
@@ -162,7 +145,6 @@ defmodule FlowStone.MixProject do
           "guides/configuration.md",
           "guides/testing.md"
         ],
-        "Architecture Decision Records": Path.wildcard("docs/adr/*.md"),
         Design: ["docs/design/OVERVIEW.md"]
       ],
       groups_for_modules: [
