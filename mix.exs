@@ -1,7 +1,7 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.5.0"
+  @version "0.5.1"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
@@ -226,6 +226,10 @@ defmodule FlowStone.MixProject do
         Resources: [
           FlowStone.Resource,
           FlowStone.Resources
+        ],
+        HTTP: [
+          FlowStone.HTTP.Client,
+          FlowStone.HTTP.Retry
         ],
         Lineage: [
           FlowStone.Lineage,

@@ -15,6 +15,7 @@ This document tracks what the live examples (in `examples/`) currently demonstra
 - Parallel branches with join coordination and partial failure handling.
 - ItemReader streaming scatter inputs with custom reader checkpointing.
 - ItemBatcher batch scatter execution with fixed-size batching and shared batch context.
+- HTTP Client resource with retry, rate limiting, and REST API integration.
 
 ## Remaining / To Add
 - Additional IO manager demos (S3/Parquet real integrations).

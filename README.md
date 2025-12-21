@@ -15,7 +15,7 @@ FlowStone is an orchestration library for Elixir that treats *assets* (named dat
 
 ## Quick Start
 
-**v0.5.0** introduces a simplified API that works with zero configuration:
+**v0.5.1** introduces an HTTP client resource for REST API integrations, building on the simplified API from v0.5.0:
 
 ```elixir
 defmodule MyApp.Pipeline do
@@ -59,7 +59,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:flowstone, "~> 0.5.0"}
+    {:flowstone, "~> 0.5.1"}
   ]
 end
 ```
@@ -468,6 +468,54 @@ asset :high_value_trade do
 end
 ```
 
+### HTTP Client Resource
+
+Built-in HTTP client for REST API integrations with retry, rate limiting, and telemetry:
+
+```elixir
+# Register an HTTP client as a resource
+FlowStone.Resources.register(:api, FlowStone.HTTP.Client,
+  base_url: "https://api.example.com",
+  timeout: 30_000,
+  headers: %{"Authorization" => "Bearer #{token}"},
+  retry: %{max_attempts: 3, base_delay_ms: 1000}
+)
+
+# Use in assets
+asset :fetch_user do
+  requires [:api]
+
+  execute fn ctx, _deps ->
+    client = ctx.resources[:api]
+
+    case FlowStone.HTTP.Client.get(client, "/users/#{ctx.partition.user_id}") do
+      {:ok, %{status: 200, body: user}} -> {:ok, user}
+      {:ok, %{status: 404}} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+end
+
+# POST with idempotency key (safe retries)
+asset :create_order do
+  requires [:api]
+
+  execute fn ctx, deps ->
+    idempotency_key = "#{ctx.run_id}-#{ctx.partition}"
+
+    FlowStone.HTTP.Client.post(ctx.resources[:api], "/orders", deps.order_data,
+      idempotency_key: idempotency_key
+    )
+  end
+end
+```
+
+The HTTP client automatically:
+- Retries on 5xx errors and transport failures
+- Respects `Retry-After` headers on 429 rate limit responses
+- Uses exponential backoff with jitter
+- Emits telemetry events for monitoring
+
 ### Rate Limiting
 
 Distributed rate limiting for APIs and external services:
@@ -530,6 +578,7 @@ FlowStone emits telemetry events for observability:
 - `[:flowstone, :signal_gate, :create | :signal | :timeout]`
 - `[:flowstone, :route, :start | :stop | :error]`
 - `[:flowstone, :parallel, :start | :stop | :error | :branch_start | :branch_complete | :branch_fail]`
+- `[:flowstone, :http, :request, :start | :stop | :error]`
 - `[:flowstone, :rate_limit, :check | :wait | :slot_acquired | :slot_released]`
 
 ## Low-Level API
@@ -590,7 +639,7 @@ mix run examples/04_backfill.exs
 
 ## Status
 
-FlowStone is in **alpha**. Core execution, persistence primitives, and safety hardening are implemented. The v0.5.0 release introduces a simplified API layer while maintaining full backward compatibility.
+FlowStone is in **alpha**. Core execution, persistence primitives, and safety hardening are implemented. The v0.5.1 release adds an HTTP client resource for REST API integrations, building on the simplified API from v0.5.0.
 
 ## Contributing
 
