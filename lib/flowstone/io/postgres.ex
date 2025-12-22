@@ -101,8 +101,19 @@ defmodule FlowStone.IO.Postgres do
 
   defp encode(data, config) do
     case config[:format] do
-      :binary -> :erlang.term_to_binary(data)
-      _ -> Jason.encode!(data)
+      :binary ->
+        :erlang.term_to_binary(data)
+
+      _ ->
+        case Jason.encode(data) do
+          {:ok, json} ->
+            json
+
+          {:error, %Jason.EncodeError{} = error} ->
+            raise ArgumentError,
+                  "Data not JSON-encodable: #{Exception.message(error)}. " <>
+                    "Use format: :binary for arbitrary Elixir terms, or ensure data is JSON-safe."
+        end
     end
   end
 

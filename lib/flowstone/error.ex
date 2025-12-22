@@ -217,4 +217,27 @@ defmodule FlowStone.Error do
   end
 
   defp format_stacktrace(_), do: ""
+
+  @doc """
+  Wrap a reason into a RuntimeError exception.
+
+  This is used internally to normalize error reasons from various sources
+  (atoms, strings, other values) into proper exception structs.
+
+  ## Examples
+
+      iex> FlowStone.Error.wrap_reason("connection failed")
+      %RuntimeError{message: "connection failed"}
+
+      iex> FlowStone.Error.wrap_reason(:timeout)
+      %RuntimeError{message: "timeout"}
+
+      iex> FlowStone.Error.wrap_reason({:error, :something})
+      %RuntimeError{message: "{:error, :something}"}
+
+  """
+  @spec wrap_reason(term()) :: Exception.t()
+  def wrap_reason(reason) when is_binary(reason), do: %RuntimeError{message: reason}
+  def wrap_reason(reason) when is_atom(reason), do: %RuntimeError{message: Atom.to_string(reason)}
+  def wrap_reason(reason), do: %RuntimeError{message: inspect(reason)}
 end

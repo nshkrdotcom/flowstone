@@ -1,8 +1,23 @@
 defmodule FlowStone.RouteDecisions do
   @moduledoc """
   Persistence wrapper for routing decisions.
+
+  ## Cleanup
+
+  Route decisions accumulate over time as pipelines run. Use the cleanup functions
+  to prevent unbounded table growth:
+
+      # Remove decisions older than 7 days
+      {:ok, count} = FlowStone.RouteDecisions.cleanup_older_than(days: 7)
+
+      # Remove all decisions for a completed run
+      {:ok, count} = FlowStone.RouteDecisions.cleanup_by_run_id(run_id)
+
+  For automated cleanup, consider scheduling a periodic job via Oban or a GenServer
+  that calls `cleanup_older_than/1` on a regular interval.
   """
 
+  import Ecto.Query
   alias FlowStone.{Partition, Repo, RouteDecision}
 
   @spec get(binary(), atom(), term()) :: {:ok, RouteDecision.t()} | {:error, :not_found}
@@ -68,5 +83,92 @@ defmodule FlowStone.RouteDecisions do
     String.to_existing_atom(string)
   rescue
     ArgumentError -> string
+  end
+
+  # Cleanup functions
+
+  @doc """
+  Remove routing decisions older than the specified duration.
+
+  ## Options
+
+    * `:days` - Number of days to keep decisions (default: 7)
+    * `:hours` - Number of hours to keep decisions (overrides `:days` if both provided)
+
+  ## Examples
+
+      # Remove decisions older than 7 days (default)
+      {:ok, count} = RouteDecisions.cleanup_older_than([])
+
+      # Remove decisions older than 30 days
+      {:ok, count} = RouteDecisions.cleanup_older_than(days: 30)
+
+      # Remove decisions older than 24 hours
+      {:ok, count} = RouteDecisions.cleanup_older_than(hours: 24)
+
+  ## Returns
+
+    * `{:ok, count}` - Number of decisions deleted
+
+  """
+  @spec cleanup_older_than(keyword()) :: {:ok, non_neg_integer()}
+  def cleanup_older_than(opts \\ []) do
+    cutoff = calculate_cutoff(opts)
+
+    {count, _} =
+      from(d in RouteDecision, where: d.inserted_at < ^cutoff)
+      |> Repo.delete_all()
+
+    :telemetry.execute(
+      [:flowstone, :route_decisions, :cleanup],
+      %{count: count},
+      %{cutoff: cutoff, type: :time_based}
+    )
+
+    {:ok, count}
+  end
+
+  @doc """
+  Remove all routing decisions for a specific run.
+
+  Use this to clean up decisions when a pipeline run is fully complete
+  and the decisions are no longer needed.
+
+  ## Examples
+
+      {:ok, count} = RouteDecisions.cleanup_by_run_id(run_id)
+
+  ## Returns
+
+    * `{:ok, count}` - Number of decisions deleted
+
+  """
+  @spec cleanup_by_run_id(binary()) :: {:ok, non_neg_integer()}
+  def cleanup_by_run_id(run_id) when is_binary(run_id) do
+    {count, _} =
+      from(d in RouteDecision, where: d.run_id == ^run_id)
+      |> Repo.delete_all()
+
+    :telemetry.execute(
+      [:flowstone, :route_decisions, :cleanup],
+      %{count: count},
+      %{run_id: run_id, type: :run_based}
+    )
+
+    {:ok, count}
+  end
+
+  defp calculate_cutoff(opts) do
+    cond do
+      hours = Keyword.get(opts, :hours) ->
+        DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+
+      days = Keyword.get(opts, :days) ->
+        DateTime.add(DateTime.utc_now(), -days * 24 * 3600, :second)
+
+      true ->
+        # Default: 7 days
+        DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)
+    end
   end
 end

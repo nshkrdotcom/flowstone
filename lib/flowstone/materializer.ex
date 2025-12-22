@@ -414,7 +414,5 @@ defmodule FlowStone.Materializer do
     })
   end
 
-  defp wrap(reason) when is_binary(reason), do: %RuntimeError{message: reason}
-  defp wrap(reason) when is_atom(reason), do: %RuntimeError{message: Atom.to_string(reason)}
-  defp wrap(reason), do: %RuntimeError{message: inspect(reason)}
+  defp wrap(reason), do: Error.wrap_reason(reason)
 end

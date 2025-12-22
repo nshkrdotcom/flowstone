@@ -9,6 +9,33 @@ defmodule FlowStone.RunConfig do
   For production use, this is a local ETS-based cache. The worker falls back to
   application config when no entry is found, making this safe for jobs that
   outlive the process that created them.
+
+  ## Distributed Deployment Warning
+
+  **This module uses node-local ETS storage.** In a multi-node Oban deployment:
+
+  - If a job is created on Node A with custom `io:` options, registry, or resource
+    servers, those values are stored in Node A's ETS table.
+  - If the job is picked up by Node B, the RunConfig entry will not be found,
+    and the worker will fall back to application-level configuration.
+
+  **Impact:**
+  - Custom runtime configuration passed to `FlowStone.materialize/2` will not
+    propagate to jobs executed on different nodes.
+  - For multi-node deployments, configure IO managers, registries, and resource
+    servers via application config (`config :flowstone, ...`) rather than
+    passing them as runtime options.
+
+  **Workaround options:**
+  1. Use application config for all production configuration
+  2. Use Oban's sticky routing to ensure jobs run on the creating node
+  3. Accept that custom runtime options only work in single-node deployments
+
+  ## Entry Lifecycle
+
+  - Entries are stored with a timestamp and automatically cleaned up after 1 hour.
+  - Cleanup runs every 10 minutes.
+  - For long-running pipelines, ensure jobs complete within the TTL window.
   """
 
   use GenServer
@@ -46,12 +73,25 @@ defmodule FlowStone.RunConfig do
   Get configuration for a run_id.
 
   Returns nil if not found (worker should fall back to application config).
+
+  Emits telemetry event `[:flowstone, :run_config, :fallback]` when entry is not
+  found, indicating the worker will use application config instead. In distributed
+  deployments, this may indicate cross-node job execution.
   """
   @spec get(String.t()) :: keyword() | nil
   def get(run_id) when is_binary(run_id) do
     case :ets.lookup(@table_name, run_id) do
-      [{^run_id, config, _ts}] -> config
-      [] -> nil
+      [{^run_id, config, _ts}] ->
+        config
+
+      [] ->
+        :telemetry.execute(
+          [:flowstone, :run_config, :fallback],
+          %{},
+          %{run_id: run_id, node: node()}
+        )
+
+        nil
     end
   end
 

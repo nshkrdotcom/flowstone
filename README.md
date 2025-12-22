@@ -15,7 +15,7 @@ FlowStone is an orchestration library for Elixir that treats *assets* (named dat
 
 ## Quick Start
 
-**v0.5.1** introduces an HTTP client resource for REST API integrations, building on the simplified API from v0.5.0:
+**v0.5.2** adds maintenance and resilience improvements, building on the HTTP client from v0.5.1:
 
 ```elixir
 defmodule MyApp.Pipeline do
@@ -59,7 +59,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:flowstone, "~> 0.5.1"}
+    {:flowstone, "~> 0.5.2"}
   ]
 end
 ```
@@ -209,6 +209,33 @@ config :flowstone,
 ```
 
 See the [Configuration Guide](guides/configuration.md) for details.
+
+### Distributed Deployment
+
+FlowStone uses node-local ETS for runtime configuration (`FlowStone.RunConfig`). In multi-node Oban deployments:
+
+**Limitation:** Custom runtime options passed to `FlowStone.materialize/2` (like `:io`, `:registry`) will not propagate to jobs executed on different nodes.
+
+**Recommendations for multi-node deployments:**
+
+1. **Use application config** for IO managers, registries, and resource servers:
+   ```elixir
+   # config/runtime.exs - these settings are available on all nodes
+   config :flowstone,
+     io_managers: %{postgres: FlowStone.IO.Postgres},
+     default_io_manager: :postgres
+   ```
+
+2. **Use Oban's queue affinity** if you need node-specific behavior
+
+3. **Monitor fallback events** via telemetry:
+   ```elixir
+   :telemetry.attach("run-config-monitor", [:flowstone, :run_config, :fallback], fn event, _, meta, _ ->
+     Logger.warning("RunConfig fallback on #{meta.node} for run_id: #{meta.run_id}")
+   end, nil)
+   ```
+
+For single-node deployments, runtime options work as expected.
 
 ## Core Concepts
 
@@ -580,6 +607,9 @@ FlowStone emits telemetry events for observability:
 - `[:flowstone, :parallel, :start | :stop | :error | :branch_start | :branch_complete | :branch_fail]`
 - `[:flowstone, :http, :request, :start | :stop | :error]`
 - `[:flowstone, :rate_limit, :check | :wait | :slot_acquired | :slot_released]`
+- `[:flowstone, :run_config, :fallback]` - Emitted when RunConfig falls back to app config (distributed mode)
+- `[:flowstone, :resources, :setup_failed]` - Emitted when a resource fails to initialize
+- `[:flowstone, :route_decisions, :cleanup]` - Emitted when route decisions are cleaned up
 
 ## Low-Level API
 
@@ -639,7 +669,7 @@ mix run examples/04_backfill.exs
 
 ## Status
 
-FlowStone is in **alpha**. Core execution, persistence primitives, and safety hardening are implemented. The v0.5.1 release adds an HTTP client resource for REST API integrations, building on the simplified API from v0.5.0.
+FlowStone is in **alpha**. Core execution, persistence primitives, and safety hardening are implemented. The v0.5.2 release adds maintenance and resilience improvements including route decision cleanup, resilient resource initialization, and improved documentation for distributed deployments.
 
 ## Contributing
 

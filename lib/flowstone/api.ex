@@ -212,6 +212,11 @@ defmodule FlowStone.API do
     end
   end
 
+  # Maximum concurrent partitions for backfill
+  @max_parallel_default 32
+  # 30 minutes per partition
+  @backfill_timeout_default 1_800_000
+
   @doc """
   Run an asset across multiple partitions.
 
@@ -229,20 +234,27 @@ defmodule FlowStone.API do
   ## Options
 
   - `partitions` - (required) Enumerable of partition keys
-  - `parallel` - Number of concurrent executions (default: 1)
+  - `parallel` - Number of concurrent executions (default: 1, max: 32)
+  - `timeout` - Timeout per partition in milliseconds (default: 30 minutes)
   - `force` - Re-run even if cached (default: `false`)
   - `on_error` - `:continue` or `:halt` (default: `:continue`)
 
   ## Returns
 
   - `{:ok, stats}` with `%{succeeded: N, failed: N, skipped: N}`
+
+  ## Resource Protection
+
+  The `parallel` option is capped at 32 to prevent resource exhaustion.
+  Each partition has a default timeout of 30 minutes.
   """
   @spec backfill(module(), atom(), keyword()) ::
           {:ok,
            %{succeeded: non_neg_integer(), failed: non_neg_integer(), skipped: non_neg_integer()}}
   def backfill(pipeline, asset_name, opts) do
     partitions = Keyword.fetch!(opts, :partitions) |> Enum.to_list()
-    parallel = Keyword.get(opts, :parallel, 1)
+    parallel = opts |> Keyword.get(:parallel, 1) |> min(@max_parallel_default) |> max(1)
+    timeout = Keyword.get(opts, :timeout, @backfill_timeout_default)
     force? = Keyword.get(opts, :force, false)
     _on_error = Keyword.get(opts, :on_error, :continue)
 
@@ -268,9 +280,13 @@ defmodule FlowStone.API do
             run(pipeline, asset_name, Keyword.put(opts, :partition, partition))
           end,
           max_concurrency: parallel,
-          timeout: :infinity
+          timeout: timeout,
+          on_timeout: :kill_task
         )
-        |> Enum.map(fn {:ok, result} -> result end)
+        |> Enum.map(fn
+          {:ok, result} -> result
+          {:exit, :timeout} -> {:error, :timeout}
+        end)
       else
         Enum.map(to_run, fn partition ->
           run(pipeline, asset_name, Keyword.put(opts, :partition, partition))
@@ -508,8 +524,8 @@ defmodule FlowStone.API do
   end
 
   defp load_deps(asset, partition, io_opts) do
-    deps = asset.depends_on || []
-    optional = asset.optional_deps || []
+    deps = Map.get(asset, :depends_on, [])
+    optional = Map.get(asset, :optional_deps, [])
 
     result =
       Enum.reduce_while(deps, %{}, fn dep, acc ->

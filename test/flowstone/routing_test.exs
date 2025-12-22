@@ -1,6 +1,7 @@
 defmodule FlowStone.RoutingTest do
   use FlowStone.TestCase, isolation: :full_isolation
 
+  import Ecto.Query
   alias FlowStone.{Materialization, Partition, Repo, RouteDecisions}
 
   defmodule Pipeline do
@@ -190,5 +191,70 @@ defmodule FlowStone.RoutingTest do
     assert deps.branch_a == :a
     assert Map.has_key?(deps, :branch_b)
     assert is_nil(deps.branch_b)
+  end
+
+  describe "RouteDecisions cleanup" do
+    test "cleanup_older_than/1 removes decisions older than specified time" do
+      run_id = Ecto.UUID.generate()
+
+      # Create a decision
+      {:ok, decision} =
+        RouteDecisions.record(run_id, :test_router, :partition1, :branch_a, [:branch_a, :branch_b])
+
+      assert {:ok, _} = RouteDecisions.get(run_id, :test_router, :partition1)
+
+      # Manually backdate the decision
+      Repo.update_all(
+        from(d in FlowStone.RouteDecision, where: d.id == ^decision.id),
+        set: [inserted_at: DateTime.add(DateTime.utc_now(), -7 * 24 * 3600, :second)]
+      )
+
+      # Cleanup decisions older than 1 day
+      {:ok, count} = RouteDecisions.cleanup_older_than(days: 1)
+      assert count >= 1
+
+      # Decision should be gone
+      assert {:error, :not_found} = RouteDecisions.get(run_id, :test_router, :partition1)
+    end
+
+    test "cleanup_older_than/1 preserves recent decisions" do
+      run_id = Ecto.UUID.generate()
+
+      # Create a fresh decision
+      {:ok, _} =
+        RouteDecisions.record(run_id, :test_router2, :partition2, :branch_b, [
+          :branch_a,
+          :branch_b
+        ])
+
+      # Cleanup decisions older than 1 day - should not delete fresh decision
+      {:ok, _count} = RouteDecisions.cleanup_older_than(days: 1)
+
+      # Decision should still exist
+      assert {:ok, _} = RouteDecisions.get(run_id, :test_router2, :partition2)
+    end
+
+    test "cleanup_by_run_id/1 removes all decisions for a run" do
+      run_id = Ecto.UUID.generate()
+
+      # Create multiple decisions for the same run
+      {:ok, _} =
+        RouteDecisions.record(run_id, :router1, :p1, :branch_a, [:branch_a, :branch_b])
+
+      {:ok, _} =
+        RouteDecisions.record(run_id, :router2, :p1, :branch_b, [:branch_a, :branch_b])
+
+      # Both should exist
+      assert {:ok, _} = RouteDecisions.get(run_id, :router1, :p1)
+      assert {:ok, _} = RouteDecisions.get(run_id, :router2, :p1)
+
+      # Cleanup by run_id
+      {:ok, count} = RouteDecisions.cleanup_by_run_id(run_id)
+      assert count == 2
+
+      # Both should be gone
+      assert {:error, :not_found} = RouteDecisions.get(run_id, :router1, :p1)
+      assert {:error, :not_found} = RouteDecisions.get(run_id, :router2, :p1)
+    end
   end
 end

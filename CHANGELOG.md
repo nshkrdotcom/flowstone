@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2025-12-22
+
+### Added
+
+#### Route Decisions Cleanup
+- `FlowStone.RouteDecisions.cleanup_older_than/1` - Remove decisions older than a specified duration
+- `FlowStone.RouteDecisions.cleanup_by_run_id/1` - Remove all decisions for a specific run
+- Telemetry event `[:flowstone, :route_decisions, :cleanup]` emitted on cleanup
+
+#### Resilient Resource Initialization
+- `FlowStone.Resources` now continues startup even if some resources fail to initialize
+- `FlowStone.Resources.list_failed/1` - Query resources that failed during setup
+- Telemetry event `[:flowstone, :resources, :setup_failed]` emitted on resource failure
+- Resources that fail return `{:error, {:setup_failed, reason}}` from `get/2`
+
+#### Distributed Deployment Documentation
+- Added comprehensive documentation for multi-node Oban deployments
+- `FlowStone.RunConfig` moduledoc documents ETS limitations and workarounds
+- README section on distributed deployment best practices
+- Telemetry event `[:flowstone, :run_config, :fallback]` when falling back to app config
+
+#### API Improvements
+- `FlowStone.backfill/3` now caps `parallel` at 32 to prevent resource exhaustion
+- `FlowStone.backfill/3` default timeout of 30 minutes per partition (was `:infinity`)
+- `FlowStone.backfill/3` accepts `:timeout` option to customize per-partition timeout
+
+#### Code Quality
+- `FlowStone.Error.wrap_reason/1` - Shared function for error reason normalization
+- Added typespecs to `FlowStone.Registry` public functions
+- Improved JSON encoding error messages in `FlowStone.IO.Postgres`
+- Fixed dialyzer warnings
+
+### Changed
+
+- `FlowStone.Resources.override/2` is now synchronous (returns `:ok` instead of casting)
+- Resources state now tracks `:status` (`:ok` or `:failed`) for each resource
+
+### Fixed
+
+- Guard clause warnings in `load_deps/3`
+
 ## [0.5.1] - 2025-12-20
 
 ### Added
@@ -205,6 +246,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Initial Release
 
+[0.5.2]: https://github.com/nshkrdotcom/flowstone/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/nshkrdotcom/flowstone/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nshkrdotcom/flowstone/compare/v0.3.0...v0.4.0

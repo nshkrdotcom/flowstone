@@ -849,15 +849,8 @@ defmodule FlowStone.Scatter do
 
   defp reader_error(asset, opts, reason) do
     partition = Keyword.get(opts, :partition)
-    Error.execution_error(asset.name, partition, wrap_reason(reason), [])
+    Error.execution_error(asset.name, partition, Error.wrap_reason(reason), [])
   end
-
-  defp wrap_reason(reason) when is_binary(reason), do: %RuntimeError{message: reason}
-
-  defp wrap_reason(reason) when is_atom(reason),
-    do: %RuntimeError{message: Atom.to_string(reason)}
-
-  defp wrap_reason(reason), do: %RuntimeError{message: inspect(reason)}
 
   defp emit_item_reader(event, measurements, meta) do
     :telemetry.execute([:flowstone, :item_reader, event], measurements, meta)
