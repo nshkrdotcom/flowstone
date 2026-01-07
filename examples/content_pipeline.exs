@@ -1,9 +1,9 @@
 # Content Generation Pipeline
-# Demonstrates using flowstone_ai for AI-powered content creation
+# Demonstrates using Altar.AI.Integrations.FlowStone for AI-powered content creation
 #
 # This pipeline:
 # 1. Takes content briefs as input
-# 2. Uses FlowStone.AI.Resource to generate drafts
+# 2. Uses Altar.AI.Integrations.FlowStone to generate drafts
 # 3. Runs quality checks and approval gates
 # 4. Produces final publishable content
 #
@@ -11,34 +11,39 @@
 #   MIX_ENV=dev mix run examples/content_pipeline.exs
 #
 # Requirements:
-#   - {:flowstone_ai, path: "../flowstone_ai"} in mix.exs
 #   - {:altar_ai, path: "../altar_ai"} in mix.exs
-#   - At least one AI SDK installed (gemini_ex, claude_agent_sdk, or codex_sdk)
+#   - (Optional) AI SDKs if you replace the Mock adapter with a real one
 
 defmodule Examples.ContentPipeline do
   @moduledoc """
-  AI-powered content generation pipeline using FlowStone and flowstone_ai.
+  AI-powered content generation pipeline using FlowStone and altar_ai.
 
   Demonstrates:
-  - Using FlowStone.AI.Resource for unified AI access
+  - Using Altar.AI.Integrations.FlowStone for unified AI access
   - Long-form content generation with automatic provider selection
   - Multi-stage content refinement (draft -> review -> final)
   - Quality scoring and automated checks
   """
 
+  alias Altar.AI.Adapters.Mock
+  alias Altar.AI.Integrations.FlowStone, as: FlowAI
+
   def run do
+    Application.put_env(:flowstone, :io_managers, %{memory: FlowStone.IO.Memory})
+
+    ensure_oban_stopped()
     ensure_started(FlowStone.Registry, name: :content_registry)
     ensure_started(FlowStone.IO.Memory, name: :content_io)
     ensure_started(FlowStone.Lineage, name: :content_lineage)
 
-    # Initialize AI resource
-    {:ok, ai_resource} = FlowStone.AI.Resource.init()
+    # Initialize AI resource with mock adapter (replace with real adapter in production)
+    {:ok, ai_resource} = FlowAI.init(adapter: Mock.new())
     Process.put(:ai_resource, ai_resource)
 
     FlowStone.register(__MODULE__.Pipeline, registry: :content_registry)
 
     IO.puts("Starting Content Generation Pipeline...")
-    IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")
+    IO.puts("AI capabilities: #{inspect(FlowAI.capabilities(ai_resource))}")
     IO.puts("Processing content brief: blog_post_001\n")
 
     result =
@@ -50,10 +55,14 @@ defmodule Examples.ContentPipeline do
         resource_server: nil
       )
 
-    FlowStone.ObanHelpers.drain()
+    maybe_drain_oban()
 
     case result do
-      {:ok, _} ->
+      {:ok, content} ->
+        IO.puts("\n=== Final Content ===")
+        display_content(content)
+
+      :ok ->
         content =
           FlowStone.IO.load(:final_content, "blog_post_001", config: %{agent: :content_io})
 
@@ -82,32 +91,56 @@ defmodule Examples.ContentPipeline do
     end
   end
 
+  defp maybe_drain_oban do
+    if Process.whereis(Oban) do
+      FlowStone.ObanHelpers.drain()
+    else
+      :ok
+    end
+  end
+
+  defp ensure_oban_stopped do
+    if Process.whereis(Oban.Registry) || Process.whereis(Oban.Config) do
+      _ = Application.stop(:oban)
+
+      Enum.each([Oban.Registry, Oban.Config], fn name ->
+        case Process.whereis(name) do
+          nil -> :ok
+          pid -> Process.exit(pid, :kill)
+        end
+      end)
+    end
+  end
+
   defmodule Pipeline do
     @moduledoc """
     Asset definitions for the content generation pipeline.
-    Uses FlowStone.AI.Resource for AI operations.
+    Uses Altar.AI.Integrations.FlowStone for AI operations.
     """
     use FlowStone.Pipeline
+    alias Altar.AI.Integrations.FlowStone, as: FlowAI
 
-    @sample_brief %{
-      topic: "Introduction to Elixir for Data Engineering",
-      target_audience: "Data engineers familiar with Python",
-      tone: "technical but approachable",
-      key_points: [
-        "BEAM VM advantages for data pipelines",
-        "Pattern matching for data transformation",
-        "OTP for fault-tolerant processing",
-        "Comparison with Python/Spark"
-      ],
-      word_count_target: 800
-    }
+    def sample_brief do
+      %{
+        topic: "Introduction to Elixir for Data Engineering",
+        target_audience: "Data engineers familiar with Python",
+        tone: "technical but approachable",
+        key_points: [
+          "BEAM VM advantages for data pipelines",
+          "Pattern matching for data transformation",
+          "OTP for fault-tolerant processing",
+          "Comparison with Python/Spark"
+        ],
+        word_count_target: 800
+      }
+    end
 
     asset :content_brief do
       description("Input content brief with requirements")
 
       execute(fn _context, _deps ->
         # In production, this would load from a CMS or database
-        {:ok, @sample_brief}
+        {:ok, __MODULE__.sample_brief()}
       end)
     end
 
@@ -117,7 +150,7 @@ defmodule Examples.ContentPipeline do
 
       execute(fn _context, %{content_brief: brief} ->
         ai = Process.get(:ai_resource)
-        generate_draft(ai, brief)
+        __MODULE__.generate_draft(ai, brief)
       end)
     end
 
@@ -126,7 +159,7 @@ defmodule Examples.ContentPipeline do
       depends_on([:draft_content, :content_brief])
 
       execute(fn _context, %{draft_content: draft, content_brief: brief} ->
-        quality_check(draft, brief)
+        __MODULE__.quality_check(draft, brief)
       end)
     end
 
@@ -135,12 +168,12 @@ defmodule Examples.ContentPipeline do
       depends_on([:reviewed_content])
 
       execute(fn _context, %{reviewed_content: reviewed} ->
-        finalize_content(reviewed)
+        __MODULE__.finalize_content(reviewed)
       end)
     end
 
-    # AI-powered draft generation using FlowStone.AI.Resource
-    defp generate_draft(ai, brief) do
+    # AI-powered draft generation using Altar.AI.Integrations.FlowStone
+    def generate_draft(ai, brief) do
       prompt = """
       Write a blog post with the following specifications:
 
@@ -161,7 +194,7 @@ defmodule Examples.ContentPipeline do
       Focus on practical examples and clear explanations.
       """
 
-      case FlowStone.AI.Resource.generate(ai, prompt) do
+      case FlowAI.generate(ai, prompt) do
         {:ok, response} ->
           content = response.content
 
@@ -170,7 +203,7 @@ defmodule Examples.ContentPipeline do
              title: extract_title(content),
              body: content,
              generated_at: DateTime.utc_now(),
-             generator: :flowstone_ai
+             generator: :altar_ai
            }}
 
         {:error, _reason} ->
@@ -216,7 +249,7 @@ defmodule Examples.ContentPipeline do
     end
 
     # Quality checking
-    defp quality_check(draft, brief) do
+    def quality_check(draft, brief) do
       word_count = draft.body |> String.split(~r/\s+/) |> length()
       key_points_covered = check_key_points(draft.body, brief.key_points)
       readability_score = calculate_readability(draft.body)
@@ -320,7 +353,7 @@ defmodule Examples.ContentPipeline do
     end
 
     # Finalization
-    defp finalize_content(%{draft: draft, quality_assessment: qa}) do
+    def finalize_content(%{draft: draft, quality_assessment: qa}) do
       {:ok,
        %{
          title: draft.title,

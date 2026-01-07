@@ -97,6 +97,10 @@ MIX_ENV=dev mix run examples/rate_limiter_example.exs
 
 These examples demonstrate integrating FlowStone with AI capabilities using the `flowstone_ai` adapter layer.
 
+> **Note**: `flowstone_ai` is deprecated. For new code, prefer
+> `Altar.AI.Integrations.FlowStone` directly from `altar_ai`. The examples
+> here continue to use `FlowStone.AI.*` for compatibility and clarity.
+
 ### Architecture
 
 The AI examples use a three-layer architecture:

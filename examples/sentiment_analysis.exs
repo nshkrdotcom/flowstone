@@ -1,9 +1,9 @@
 # Sentiment Analysis Pipeline with Sensor Triggers
-# Demonstrates sensor-driven materialization for real-time processing using flowstone_ai
+# Demonstrates sensor-driven materialization for real-time processing using Altar.AI.Integrations.FlowStone
 #
 # This pipeline:
 # 1. Uses a sensor to detect new review files
-# 2. Analyzes sentiment using FlowStone.AI.Assets.classify_each
+# 2. Analyzes sentiment using Altar.AI.Integrations.FlowStone.classify_each
 # 3. Generates alerts for negative sentiment
 # 4. Tracks trends over time
 #
@@ -11,52 +11,63 @@
 #   MIX_ENV=dev mix run examples/sentiment_analysis.exs
 #
 # Requirements:
-#   - {:flowstone_ai, path: "../flowstone_ai"} in mix.exs
 #   - {:altar_ai, path: "../altar_ai"} in mix.exs
-#   - At least one AI SDK installed (gemini_ex, claude_agent_sdk, or codex_sdk)
+#   - (Optional) AI SDKs if you replace the Mock adapter with a real one
 
 defmodule Examples.SentimentAnalysis do
   @moduledoc """
-  Real-time sentiment analysis pipeline using FlowStone sensors and flowstone_ai.
+  Real-time sentiment analysis pipeline using FlowStone sensors and altar_ai.
 
   Demonstrates:
   - File arrival sensors for triggering pipelines
-  - FlowStone.AI.Assets.classify_each for sentiment classification
+  - Altar.AI.Integrations.FlowStone.classify_each for sentiment classification
   - Time-window partitioning for streaming data
   - Alert thresholds and notification patterns
   """
 
+  alias Altar.AI.Adapters.Mock
+  alias Altar.AI.Integrations.FlowStone, as: FlowAI
+
   def run do
+    Application.put_env(:flowstone, :io_managers, %{memory: FlowStone.IO.Memory})
+
+    ensure_oban_stopped()
     ensure_started(FlowStone.Registry, name: :sentiment_registry)
     ensure_started(FlowStone.IO.Memory, name: :sentiment_io)
     ensure_started(FlowStone.Lineage, name: :sentiment_lineage)
 
-    # Initialize AI resource
-    {:ok, ai_resource} = FlowStone.AI.Resource.init()
+    # Initialize AI resource with mock adapter (replace with real adapter in production)
+    {:ok, ai_resource} = FlowAI.init(adapter: Mock.new())
     Process.put(:ai_resource, ai_resource)
 
     FlowStone.register(__MODULE__.Pipeline, registry: :sentiment_registry)
 
     IO.puts("Starting Sentiment Analysis Pipeline...")
-    IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")
+    IO.puts("AI capabilities: #{inspect(FlowAI.capabilities(ai_resource))}")
     IO.puts("Processing time window: #{Date.utc_today()}\n")
 
     # Simulate sensor trigger with today's partition
-    partition = Date.to_string(Date.utc_today())
+    partition = Date.utc_today()
 
     result =
-      FlowStone.materialize_all(:sentiment_alerts,
-        partition: partition,
-        registry: :sentiment_registry,
-        io: [config: %{agent: :sentiment_io}],
-        lineage_server: :sentiment_lineage,
-        resource_server: nil
-      )
+      materialize_with_retry(fn ->
+        FlowStone.materialize_all(:sentiment_alerts,
+          partition: partition,
+          registry: :sentiment_registry,
+          io: [config: %{agent: :sentiment_io}],
+          lineage_server: :sentiment_lineage,
+          resource_server: nil
+        )
+      end)
 
-    FlowStone.ObanHelpers.drain()
+    maybe_drain_oban()
 
     case result do
-      {:ok, _} ->
+      {:ok, alerts} ->
+        IO.puts("\n=== Sentiment Analysis Results ===")
+        display_alerts(alerts)
+
+      :ok ->
         alerts = FlowStone.IO.load(:sentiment_alerts, partition, config: %{agent: :sentiment_io})
         IO.puts("\n=== Sentiment Analysis Results ===")
         display_alerts(alerts)
@@ -100,66 +111,105 @@ defmodule Examples.SentimentAnalysis do
     end
   end
 
+  defp maybe_drain_oban do
+    if Process.whereis(Oban) do
+      FlowStone.ObanHelpers.drain()
+    else
+      :ok
+    end
+  end
+
+  defp materialize_with_retry(fun, attempts \\ 3)
+
+  defp materialize_with_retry(fun, attempts) when attempts > 0 do
+    case fun.() do
+      {:snooze, _delay} ->
+        Process.sleep(50)
+        materialize_with_retry(fun, attempts - 1)
+
+      other ->
+        other
+    end
+  end
+
+  defp materialize_with_retry(_fun, 0), do: {:error, :snoozed}
+
+  defp ensure_oban_stopped do
+    if Process.whereis(Oban.Registry) || Process.whereis(Oban.Config) do
+      _ = Application.stop(:oban)
+
+      Enum.each([Oban.Registry, Oban.Config], fn name ->
+        case Process.whereis(name) do
+          nil -> :ok
+          pid -> Process.exit(pid, :kill)
+        end
+      end)
+    end
+  end
+
   defmodule Pipeline do
     @moduledoc """
     Asset definitions for the sentiment analysis pipeline.
-    Uses FlowStone.AI.Assets for classification.
+    Uses Altar.AI.Integrations.FlowStone for classification.
     """
     use FlowStone.Pipeline
+    alias Altar.AI.Integrations.FlowStone, as: FlowAI
 
     # Simulated review data (in production, would come from sensor-detected files)
-    @sample_reviews [
-      %{
-        id: "rev_001",
-        text: "Absolutely love this product! Best purchase I've made this year.",
-        source: "app_store",
-        timestamp: ~U[2025-01-15 10:00:00Z]
-      },
-      %{
-        id: "rev_002",
-        text: "App crashes constantly. Lost all my data. Terrible experience.",
-        source: "app_store",
-        timestamp: ~U[2025-01-15 11:30:00Z]
-      },
-      %{
-        id: "rev_003",
-        text: "It's okay. Does what it says but nothing special.",
-        source: "play_store",
-        timestamp: ~U[2025-01-15 12:15:00Z]
-      },
-      %{
-        id: "rev_004",
-        text: "Customer support never responded. Very disappointed.",
-        source: "trustpilot",
-        timestamp: ~U[2025-01-15 14:00:00Z]
-      },
-      %{
-        id: "rev_005",
-        text: "Great features and smooth performance. Highly recommended!",
-        source: "play_store",
-        timestamp: ~U[2025-01-15 15:30:00Z]
-      },
-      %{
-        id: "rev_006",
-        text: "Subscription price is too high for what you get.",
-        source: "app_store",
-        timestamp: ~U[2025-01-15 16:45:00Z]
-      },
-      %{
-        id: "rev_007",
-        text: "The new update fixed all my issues. Thanks team!",
-        source: "app_store",
-        timestamp: ~U[2025-01-15 17:00:00Z]
-      },
-      %{
-        id: "rev_008",
-        text: "Buggy mess. Don't waste your money.",
-        source: "trustpilot",
-        timestamp: ~U[2025-01-15 18:30:00Z]
-      }
-    ]
+    def sample_reviews do
+      [
+        %{
+          id: "rev_001",
+          text: "Absolutely love this product! Best purchase I've made this year.",
+          source: "app_store",
+          timestamp: ~U[2025-01-15 10:00:00Z]
+        },
+        %{
+          id: "rev_002",
+          text: "App crashes constantly. Lost all my data. Terrible experience.",
+          source: "app_store",
+          timestamp: ~U[2025-01-15 11:30:00Z]
+        },
+        %{
+          id: "rev_003",
+          text: "It's okay. Does what it says but nothing special.",
+          source: "play_store",
+          timestamp: ~U[2025-01-15 12:15:00Z]
+        },
+        %{
+          id: "rev_004",
+          text: "Customer support never responded. Very disappointed.",
+          source: "trustpilot",
+          timestamp: ~U[2025-01-15 14:00:00Z]
+        },
+        %{
+          id: "rev_005",
+          text: "Great features and smooth performance. Highly recommended!",
+          source: "play_store",
+          timestamp: ~U[2025-01-15 15:30:00Z]
+        },
+        %{
+          id: "rev_006",
+          text: "Subscription price is too high for what you get.",
+          source: "app_store",
+          timestamp: ~U[2025-01-15 16:45:00Z]
+        },
+        %{
+          id: "rev_007",
+          text: "The new update fixed all my issues. Thanks team!",
+          source: "app_store",
+          timestamp: ~U[2025-01-15 17:00:00Z]
+        },
+        %{
+          id: "rev_008",
+          text: "Buggy mess. Don't waste your money.",
+          source: "trustpilot",
+          timestamp: ~U[2025-01-15 18:30:00Z]
+        }
+      ]
+    end
 
-    @sentiment_labels ["positive", "negative", "neutral"]
+    def sentiment_labels, do: ["positive", "negative", "neutral"]
 
     # Alert thresholds
     # Alert if >30% negative
@@ -179,24 +229,24 @@ defmodule Examples.SentimentAnalysis do
         IO.puts("Loading reviews for partition: #{partition}")
 
         # Simulate loading reviews for this time window
-        {:ok, @sample_reviews}
+        {:ok, __MODULE__.sample_reviews()}
       end)
     end
 
     asset :analyzed_reviews do
-      description("Reviews with sentiment analysis via flowstone_ai")
+      description("Reviews with sentiment analysis via altar_ai")
       depends_on([:raw_reviews])
 
       execute(fn _context, %{raw_reviews: reviews} ->
         ai = Process.get(:ai_resource)
 
-        # Use FlowStone.AI.Assets for classification
+        # Use Altar.AI.Integrations.FlowStone for classification
         {:ok, classified} =
-          FlowStone.AI.Assets.classify_each(
+          FlowAI.classify_each(
             ai,
             reviews,
             & &1.text,
-            @sentiment_labels
+            __MODULE__.sentiment_labels()
           )
 
         # Map classification results to expected format and extract topics
@@ -214,7 +264,7 @@ defmodule Examples.SentimentAnalysis do
               end
 
             # Extract topics using heuristics (in production, could use AI)
-            topics = extract_topics(review.text)
+            topics = __MODULE__.extract_topics(review.text)
 
             Map.merge(review, %{
               sentiment: sentiment,
@@ -232,7 +282,7 @@ defmodule Examples.SentimentAnalysis do
       depends_on([:analyzed_reviews])
 
       execute(fn context, %{analyzed_reviews: reviews} ->
-        summary = calculate_summary(reviews, context.partition)
+        summary = __MODULE__.calculate_summary(reviews, context.partition)
         {:ok, summary}
       end)
     end
@@ -242,8 +292,8 @@ defmodule Examples.SentimentAnalysis do
       depends_on([:sentiment_summary, :analyzed_reviews])
 
       execute(fn _context, %{sentiment_summary: summary, analyzed_reviews: reviews} ->
-        alerts = generate_alerts(summary, reviews)
-        trends = calculate_trends(reviews)
+        alerts = __MODULE__.generate_alerts(summary, reviews)
+        trends = __MODULE__.calculate_trends(reviews)
 
         {:ok,
          %{
@@ -256,7 +306,7 @@ defmodule Examples.SentimentAnalysis do
     end
 
     # Topic extraction using heuristics
-    defp extract_topics(text) do
+    def extract_topics(text) do
       text_lower = String.downcase(text)
 
       topic_keywords = %{
@@ -275,7 +325,7 @@ defmodule Examples.SentimentAnalysis do
     end
 
     # Summary calculation
-    defp calculate_summary(reviews, partition) do
+    def calculate_summary(reviews, partition) do
       total = length(reviews)
 
       by_sentiment = Enum.group_by(reviews, & &1.sentiment)
@@ -322,7 +372,7 @@ defmodule Examples.SentimentAnalysis do
     end
 
     # Alert generation
-    defp generate_alerts(summary, reviews) do
+    def generate_alerts(summary, reviews) do
       alerts = []
 
       # Check negative ratio
@@ -387,7 +437,7 @@ defmodule Examples.SentimentAnalysis do
     end
 
     # Trend calculation
-    defp calculate_trends(reviews) do
+    def calculate_trends(reviews) do
       # Sort by timestamp
       sorted = Enum.sort_by(reviews, & &1.timestamp, DateTime)
 

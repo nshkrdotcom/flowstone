@@ -1,58 +1,73 @@
 # Embedding Generation Pipeline
-# Demonstrates using flowstone_ai for vector embedding generation
+# Demonstrates using Altar.AI.Integrations.FlowStone for vector embedding generation
 #
 # This pipeline:
 # 1. Loads documents to embed
-# 2. Uses FlowStone.AI.Assets.embed_each for batch embedding
+# 2. Uses Altar.AI.Integrations.FlowStone.embed_each for batch embedding
 # 3. Creates a searchable vector index
 #
 # Usage:
 #   MIX_ENV=dev mix run examples/embedding_pipeline.exs
 #
 # Requirements:
-#   - {:flowstone_ai, path: "../flowstone_ai"} in mix.exs
 #   - {:altar_ai, path: "../altar_ai"} in mix.exs
-#   - At least one AI SDK with embedding support (gemini_ex preferred)
+#   - (Optional) AI SDKs if you replace the Mock adapter with a real one
 
 defmodule Examples.EmbeddingPipeline do
   @moduledoc """
-  Vector embedding generation pipeline using FlowStone and flowstone_ai.
+  Vector embedding generation pipeline using FlowStone and altar_ai.
 
   Demonstrates:
-  - Using FlowStone.AI.Assets.embed_each for batch embeddings
+  - Using Altar.AI.Integrations.FlowStone.embed_each for batch embeddings
   - Processing document collections
   - Building simple vector search indexes
   - Automatic fallback to pseudo-embeddings when AI unavailable
   """
 
+  alias Altar.AI.Adapters.Mock
+  alias Altar.AI.Integrations.FlowStone, as: FlowAI
+
   def run do
+    Application.put_env(:flowstone, :io_managers, %{memory: FlowStone.IO.Memory})
+
+    ensure_oban_stopped()
     ensure_started(FlowStone.Registry, name: :embedding_registry)
     ensure_started(FlowStone.IO.Memory, name: :embedding_io)
     ensure_started(FlowStone.Lineage, name: :embedding_lineage)
 
-    # Initialize AI resource
-    {:ok, ai_resource} = FlowStone.AI.Resource.init()
+    # Initialize AI resource with mock adapter (replace with real adapter in production)
+    {:ok, ai_resource} = FlowAI.init(adapter: Mock.new())
     Process.put(:ai_resource, ai_resource)
 
     FlowStone.register(__MODULE__.Pipeline, registry: :embedding_registry)
 
     IO.puts("Starting Embedding Generation Pipeline...")
-    IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")
+    IO.puts("AI capabilities: #{inspect(FlowAI.capabilities(ai_resource))}")
     IO.puts("Processing document batch: docs_batch_001\n")
 
     result =
-      FlowStone.materialize_all(:vector_index,
-        partition: "docs_batch_001",
-        registry: :embedding_registry,
-        io: [config: %{agent: :embedding_io}],
-        lineage_server: :embedding_lineage,
-        resource_server: nil
-      )
+      materialize_with_retry(fn ->
+        FlowStone.materialize_all(:vector_index,
+          partition: "docs_batch_001",
+          registry: :embedding_registry,
+          io: [config: %{agent: :embedding_io}],
+          lineage_server: :embedding_lineage,
+          resource_server: nil
+        )
+      end)
 
-    FlowStone.ObanHelpers.drain()
+    maybe_drain_oban()
 
     case result do
-      {:ok, _} ->
+      {:ok, index} ->
+        IO.puts("\n=== Vector Index Created ===")
+        display_index(index)
+
+        # Demo search
+        IO.puts("\n=== Demo Search ===")
+        demo_search(index)
+
+      :ok ->
         index =
           FlowStone.IO.load(:vector_index, "docs_batch_001", config: %{agent: :embedding_io})
 
@@ -115,70 +130,109 @@ defmodule Examples.EmbeddingPipeline do
     end
   end
 
+  defp maybe_drain_oban do
+    if Process.whereis(Oban) do
+      FlowStone.ObanHelpers.drain()
+    else
+      :ok
+    end
+  end
+
+  defp materialize_with_retry(fun, attempts \\ 3)
+
+  defp materialize_with_retry(fun, attempts) when attempts > 0 do
+    case fun.() do
+      {:snooze, _delay} ->
+        Process.sleep(50)
+        materialize_with_retry(fun, attempts - 1)
+
+      other ->
+        other
+    end
+  end
+
+  defp materialize_with_retry(_fun, 0), do: {:error, :snoozed}
+
+  defp ensure_oban_stopped do
+    if Process.whereis(Oban.Registry) || Process.whereis(Oban.Config) do
+      _ = Application.stop(:oban)
+
+      Enum.each([Oban.Registry, Oban.Config], fn name ->
+        case Process.whereis(name) do
+          nil -> :ok
+          pid -> Process.exit(pid, :kill)
+        end
+      end)
+    end
+  end
+
   defmodule Pipeline do
     @moduledoc """
     Asset definitions for the embedding generation pipeline.
-    Uses FlowStone.AI.Assets for batch embedding.
+    Uses Altar.AI.Integrations.FlowStone for batch embedding.
     """
     use FlowStone.Pipeline
+    alias Altar.AI.Integrations.FlowStone, as: FlowAI
 
-    @sample_documents [
-      %{
-        id: "doc_001",
-        content:
-          "Elixir is a dynamic, functional language designed for building scalable and maintainable applications.",
-        metadata: %{source: "intro", category: "language"}
-      },
-      %{
-        id: "doc_002",
-        content:
-          "Pattern matching in Elixir allows you to destructure data and bind variables in a single operation.",
-        metadata: %{source: "tutorial", category: "syntax"}
-      },
-      %{
-        id: "doc_003",
-        content:
-          "GenServer is a behavior module for implementing server processes with state management and supervision.",
-        metadata: %{source: "otp", category: "concurrency"}
-      },
-      %{
-        id: "doc_004",
-        content:
-          "The pipe operator |> chains function calls by passing the result as the first argument to the next function.",
-        metadata: %{source: "tutorial", category: "syntax"}
-      },
-      %{
-        id: "doc_005",
-        content:
-          "Phoenix LiveView enables rich, real-time user experiences with server-rendered HTML and WebSocket connections.",
-        metadata: %{source: "web", category: "framework"}
-      },
-      %{
-        id: "doc_006",
-        content:
-          "Ecto provides a database wrapper and query language for Elixir with support for migrations and changesets.",
-        metadata: %{source: "database", category: "framework"}
-      },
-      %{
-        id: "doc_007",
-        content:
-          "Supervision trees restart failed processes automatically, providing fault tolerance in Elixir applications.",
-        metadata: %{source: "otp", category: "reliability"}
-      },
-      %{
-        id: "doc_008",
-        content:
-          "Macros in Elixir allow compile-time metaprogramming to extend the language and reduce boilerplate code.",
-        metadata: %{source: "advanced", category: "metaprogramming"}
-      }
-    ]
+    def sample_documents do
+      [
+        %{
+          id: "doc_001",
+          content:
+            "Elixir is a dynamic, functional language designed for building scalable and maintainable applications.",
+          metadata: %{source: "intro", category: "language"}
+        },
+        %{
+          id: "doc_002",
+          content:
+            "Pattern matching in Elixir allows you to destructure data and bind variables in a single operation.",
+          metadata: %{source: "tutorial", category: "syntax"}
+        },
+        %{
+          id: "doc_003",
+          content:
+            "GenServer is a behavior module for implementing server processes with state management and supervision.",
+          metadata: %{source: "otp", category: "concurrency"}
+        },
+        %{
+          id: "doc_004",
+          content:
+            "The pipe operator |> chains function calls by passing the result as the first argument to the next function.",
+          metadata: %{source: "tutorial", category: "syntax"}
+        },
+        %{
+          id: "doc_005",
+          content:
+            "Phoenix LiveView enables rich, real-time user experiences with server-rendered HTML and WebSocket connections.",
+          metadata: %{source: "web", category: "framework"}
+        },
+        %{
+          id: "doc_006",
+          content:
+            "Ecto provides a database wrapper and query language for Elixir with support for migrations and changesets.",
+          metadata: %{source: "database", category: "framework"}
+        },
+        %{
+          id: "doc_007",
+          content:
+            "Supervision trees restart failed processes automatically, providing fault tolerance in Elixir applications.",
+          metadata: %{source: "otp", category: "reliability"}
+        },
+        %{
+          id: "doc_008",
+          content:
+            "Macros in Elixir allow compile-time metaprogramming to extend the language and reduce boilerplate code.",
+          metadata: %{source: "advanced", category: "metaprogramming"}
+        }
+      ]
+    end
 
     asset :raw_documents do
       description("Raw documents to embed")
 
       execute(fn _context, _deps ->
         # In production, would load from database or file system
-        {:ok, @sample_documents}
+        {:ok, __MODULE__.sample_documents()}
       end)
     end
 
@@ -193,7 +247,7 @@ defmodule Examples.EmbeddingPipeline do
               id: doc.id,
               content: doc.content,
               # Combine content with metadata for richer embeddings
-              text_for_embedding: build_embedding_text(doc),
+              text_for_embedding: __MODULE__.build_embedding_text(doc),
               metadata: doc.metadata
             }
           end)
@@ -203,12 +257,12 @@ defmodule Examples.EmbeddingPipeline do
     end
 
     asset :embeddings do
-      description("Vector embeddings generated via flowstone_ai")
+      description("Vector embeddings generated via altar_ai")
       depends_on([:preprocessed_documents])
 
       execute(fn _context, %{preprocessed_documents: docs} ->
         ai = Process.get(:ai_resource)
-        generate_embeddings(ai, docs)
+        __MODULE__.generate_embeddings(ai, docs)
       end)
     end
 
@@ -217,19 +271,19 @@ defmodule Examples.EmbeddingPipeline do
       depends_on([:preprocessed_documents, :embeddings])
 
       execute(fn _context, %{preprocessed_documents: docs, embeddings: embeddings} ->
-        build_index(docs, embeddings)
+        __MODULE__.build_index(docs, embeddings)
       end)
     end
 
-    defp build_embedding_text(doc) do
+    def build_embedding_text(doc) do
       category = doc.metadata[:category] || ""
       "#{category}: #{doc.content}"
     end
 
-    # Embedding generation using FlowStone.AI.Assets
-    defp generate_embeddings(ai, docs) do
-      # Use FlowStone.AI.Assets.embed_each for batch embedding
-      case FlowStone.AI.Assets.embed_each(ai, docs, & &1.text_for_embedding) do
+    # Embedding generation using Altar.AI.Integrations.FlowStone
+    def generate_embeddings(ai, docs) do
+      # Use Altar.AI.Integrations.FlowStone.embed_each for batch embedding
+      case FlowAI.embed_each(ai, docs, & &1.text_for_embedding) do
         {:ok, embedded_docs} ->
           # Extract embedding dimension from first doc
           dim = get_embedding_dim(embedded_docs)
@@ -238,7 +292,7 @@ defmodule Examples.EmbeddingPipeline do
            %{
              documents: embedded_docs,
              embedding_dim: dim,
-             generator: :flowstone_ai
+             generator: :altar_ai
            }}
 
         {:error, _reason} ->
@@ -301,7 +355,7 @@ defmodule Examples.EmbeddingPipeline do
     end
 
     # Index building
-    defp build_index(docs, embeddings) do
+    def build_index(_docs, embeddings) do
       # Create document lookup for search
       doc_map =
         Enum.map(embeddings.documents, fn doc ->

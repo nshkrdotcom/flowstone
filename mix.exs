@@ -22,12 +22,6 @@ defmodule FlowStone.MixProject do
 
       # Testing
       test_coverage: [tool: ExCoveralls],
-      preferred_cli_env: [
-        coveralls: :test,
-        "coveralls.detail": :test,
-        "coveralls.post": :test,
-        "coveralls.html": :test
-      ],
 
       # Dialyzer
       dialyzer: [
@@ -44,6 +38,17 @@ defmodule FlowStone.MixProject do
     ]
   end
 
+  def cli do
+    [
+      preferred_envs: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test
+      ]
+    ]
+  end
+
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
@@ -54,6 +59,7 @@ defmodule FlowStone.MixProject do
       {:postgrex, "~> 0.17"},
       {:oban, "~> 2.18"},
       {:jason, "~> 1.4"},
+      {:plug_crypto, "~> 2.0"},
 
       # Phoenix / LiveView (optional for UI)
       {:phoenix, "~> 1.7", optional: true},
@@ -80,7 +86,7 @@ defmodule FlowStone.MixProject do
       {:ex_aws_dynamo, "~> 4.2", optional: true},
 
       # Testing
-      {:supertester, "~> 0.3.1", only: :test},
+      {:supertester, path: "../supertester", only: :test},
       {:mox, "~> 1.1", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: :test},
@@ -127,6 +133,7 @@ defmodule FlowStone.MixProject do
       name: "FlowStone",
       source_ref: "v#{@version}",
       source_url: @source_url,
+      logo: "assets/flowstone.svg",
       assets: %{"assets" => "assets"},
       extras: [
         {"README.md", [filename: "readme"]},

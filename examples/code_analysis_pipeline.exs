@@ -1,43 +1,48 @@
 # Code Analysis Pipeline
-# Demonstrates using flowstone_ai for AI-powered code analysis and documentation
+# Demonstrates using Altar.AI.Integrations.FlowStone for AI-powered code analysis and documentation
 #
 # This pipeline:
 # 1. Scans source code files
-# 2. Uses FlowStone.AI.Resource for code analysis and documentation generation
+# 2. Uses Altar.AI.Integrations.FlowStone for code analysis and documentation generation
 # 3. Produces documentation and metrics reports
 #
 # Usage:
 #   MIX_ENV=dev mix run examples/code_analysis_pipeline.exs
 #
 # Requirements:
-#   - {:flowstone_ai, path: "../flowstone_ai"} in mix.exs
 #   - {:altar_ai, path: "../altar_ai"} in mix.exs
-#   - At least one AI SDK installed (gemini_ex, claude_agent_sdk, or codex_sdk)
+#   - (Optional) AI SDKs if you replace the Mock adapter with a real one
 
 defmodule Examples.CodeAnalysisPipeline do
   @moduledoc """
-  AI-powered code analysis pipeline using FlowStone and flowstone_ai.
+  AI-powered code analysis pipeline using FlowStone and altar_ai.
 
   Demonstrates:
-  - Using FlowStone.AI.Resource for code understanding
+  - Using Altar.AI.Integrations.FlowStone for code understanding
   - Processing multiple files as partitions
   - Generating automated documentation
   - Combining AI analysis with structural parsing
   """
 
+  alias Altar.AI.Adapters.Mock
+  alias Altar.AI.Integrations.FlowStone, as: FlowAI
+
   def run do
+    Application.put_env(:flowstone, :io_managers, %{memory: FlowStone.IO.Memory})
+
+    ensure_oban_stopped()
     ensure_started(FlowStone.Registry, name: :analysis_registry)
     ensure_started(FlowStone.IO.Memory, name: :analysis_io)
     ensure_started(FlowStone.Lineage, name: :analysis_lineage)
 
-    # Initialize AI resource
-    {:ok, ai_resource} = FlowStone.AI.Resource.init()
+    # Initialize AI resource with mock adapter (replace with real adapter in production)
+    {:ok, ai_resource} = FlowAI.init(adapter: Mock.new())
     Process.put(:ai_resource, ai_resource)
 
     FlowStone.register(__MODULE__.Pipeline, registry: :analysis_registry)
 
     IO.puts("Starting Code Analysis Pipeline...")
-    IO.puts("AI capabilities: #{inspect(FlowStone.AI.Resource.capabilities(ai_resource))}")
+    IO.puts("AI capabilities: #{inspect(FlowAI.capabilities(ai_resource))}")
     IO.puts("Analyzing module: sample_module\n")
 
     result =
@@ -49,10 +54,14 @@ defmodule Examples.CodeAnalysisPipeline do
         resource_server: nil
       )
 
-    FlowStone.ObanHelpers.drain()
+    maybe_drain_oban()
 
     case result do
-      {:ok, _} ->
+      {:ok, report} ->
+        IO.puts("\n=== Code Analysis Report ===")
+        display_report(report)
+
+      :ok ->
         report =
           FlowStone.IO.load(:analysis_report, "sample_module", config: %{agent: :analysis_io})
 
@@ -94,49 +103,73 @@ defmodule Examples.CodeAnalysisPipeline do
     end
   end
 
+  defp maybe_drain_oban do
+    if Process.whereis(Oban) do
+      FlowStone.ObanHelpers.drain()
+    else
+      :ok
+    end
+  end
+
+  defp ensure_oban_stopped do
+    if Process.whereis(Oban.Registry) || Process.whereis(Oban.Config) do
+      _ = Application.stop(:oban)
+
+      Enum.each([Oban.Registry, Oban.Config], fn name ->
+        case Process.whereis(name) do
+          nil -> :ok
+          pid -> Process.exit(pid, :kill)
+        end
+      end)
+    end
+  end
+
   defmodule Pipeline do
     @moduledoc """
     Asset definitions for the code analysis pipeline.
-    Uses FlowStone.AI.Resource for AI operations.
+    Uses Altar.AI.Integrations.FlowStone for AI operations.
     """
     use FlowStone.Pipeline
+    alias Altar.AI.Integrations.FlowStone, as: FlowAI
 
     # Sample code to analyze (in production, would read from filesystem)
-    @sample_code """
-    defmodule DataProcessor do
-      @moduledoc "Processes and transforms data records."
+    def sample_code do
+      """
+      defmodule DataProcessor do
+        @moduledoc "Processes and transforms data records."
 
-      def process(records) when is_list(records) do
-        records
-        |> Enum.filter(&valid?/1)
-        |> Enum.map(&transform/1)
-        |> Enum.reduce(%{}, &aggregate/2)
+        def process(records) when is_list(records) do
+          records
+          |> Enum.filter(&valid?/1)
+          |> Enum.map(&transform/1)
+          |> Enum.reduce(%{}, &aggregate/2)
+        end
+
+        def valid?(%{status: status}) when status in [:active, :pending], do: true
+        def valid?(_), do: false
+
+        defp transform(%{value: v} = record) do
+          %{record | value: v * 1.1, processed_at: DateTime.utc_now()}
+        end
+
+        defp aggregate(record, acc) do
+          key = record.category
+          Map.update(acc, key, [record], &[record | &1])
+        end
+
+        def summarize(processed_data) do
+          processed_data
+          |> Enum.map(fn {category, records} ->
+            {category, %{
+              count: length(records),
+              total_value: records |> Enum.map(& &1.value) |> Enum.sum()
+            }}
+          end)
+          |> Map.new()
+        end
       end
-
-      def valid?(%{status: status}) when status in [:active, :pending], do: true
-      def valid?(_), do: false
-
-      defp transform(%{value: v} = record) do
-        %{record | value: v * 1.1, processed_at: DateTime.utc_now()}
-      end
-
-      defp aggregate(record, acc) do
-        key = record.category
-        Map.update(acc, key, [record], &[record | &1])
-      end
-
-      def summarize(processed_data) do
-        processed_data
-        |> Enum.map(fn {category, records} ->
-          {category, %{
-            count: length(records),
-            total_value: records |> Enum.map(& &1.value) |> Enum.sum()
-          }}
-        end)
-        |> Map.new()
-      end
+      """
     end
-    """
 
     asset :source_code do
       description("Source code to analyze")
@@ -146,7 +179,7 @@ defmodule Examples.CodeAnalysisPipeline do
         {:ok,
          %{
            module_name: "DataProcessor",
-           code: @sample_code,
+           code: __MODULE__.sample_code(),
            file_path: "lib/data_processor.ex"
          }}
       end)
@@ -157,7 +190,7 @@ defmodule Examples.CodeAnalysisPipeline do
       depends_on([:source_code])
 
       execute(fn _context, %{source_code: source} ->
-        parse_code(source)
+        __MODULE__.parse_code(source)
       end)
     end
 
@@ -167,7 +200,7 @@ defmodule Examples.CodeAnalysisPipeline do
 
       execute(fn _context, %{source_code: source, parsed_code: parsed} ->
         ai = Process.get(:ai_resource)
-        analyze_with_ai(ai, source, parsed)
+        __MODULE__.analyze_with_ai(ai, source, parsed)
       end)
     end
 
@@ -176,12 +209,12 @@ defmodule Examples.CodeAnalysisPipeline do
       depends_on([:parsed_code, :ai_analysis])
 
       execute(fn _context, %{parsed_code: parsed, ai_analysis: analysis} ->
-        generate_report(parsed, analysis)
+        __MODULE__.generate_report(parsed, analysis)
       end)
     end
 
     # Code parsing
-    defp parse_code(%{code: code, module_name: name}) do
+    def parse_code(%{code: code, module_name: name}) do
       case Code.string_to_quoted(code) do
         {:ok, ast} ->
           functions = extract_functions(ast)
@@ -243,8 +276,8 @@ defmodule Examples.CodeAnalysisPipeline do
       Float.round(count / 5.0 + 1.0, 1)
     end
 
-    # AI-powered analysis using FlowStone.AI.Resource
-    defp analyze_with_ai(ai, %{code: code, module_name: name}, parsed) do
+    # AI-powered analysis using Altar.AI.Integrations.FlowStone
+    def analyze_with_ai(ai, %{code: code, module_name: name}, parsed) do
       prompt = """
       Analyze this Elixir module and provide:
       1. A one-paragraph summary of what the module does
@@ -265,7 +298,7 @@ defmodule Examples.CodeAnalysisPipeline do
       }
       """
 
-      case FlowStone.AI.Resource.generate(ai, prompt) do
+      case FlowAI.generate(ai, prompt) do
         {:ok, response} ->
           case extract_json(response.content) do
             {:ok, analysis} ->
@@ -273,7 +306,7 @@ defmodule Examples.CodeAnalysisPipeline do
                %{
                  summary: analysis["summary"] || "Module analysis completed.",
                  function_docs: analysis["functions"] || [],
-                 generated_by: :flowstone_ai
+                 generated_by: :altar_ai
                }}
 
             {:error, _} ->
@@ -328,7 +361,7 @@ defmodule Examples.CodeAnalysisPipeline do
     end
 
     # Report generation
-    defp generate_report(parsed, analysis) do
+    def generate_report(parsed, analysis) do
       functions =
         Enum.map(parsed.functions, fn {name, arity, _visibility} ->
           doc = find_function_doc(analysis.function_docs, name, arity)
