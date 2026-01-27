@@ -31,7 +31,9 @@ defmodule FlowStone.Config do
   | `:repo` | `nil` | Ecto repo for persistence |
   | `:storage` | Auto | Storage backend (`:memory`, `:postgres`, `:s3`) |
   | `:lineage` | Auto | Enable lineage tracking (true if repo configured) |
+  | `:lineage_ir` | `true` | Emit LineageIR spans and artifacts |
   | `:async_default` | `false` | Default async execution mode |
+  | `:run_index_adapter` | `FlowStone.RunIndex.Adapters.Noop` | RunIndex sink adapter |
 
   ## Legacy Config
 
@@ -47,8 +49,10 @@ defmodule FlowStone.Config do
           repo: module() | nil,
           storage: :memory | :postgres | :s3 | :parquet,
           lineage: boolean(),
+          lineage_ir: boolean(),
           async_default: boolean(),
-          oban: keyword() | nil
+          oban: keyword() | nil,
+          run_index_adapter: module()
         }
 
   @doc """
@@ -63,8 +67,10 @@ defmodule FlowStone.Config do
       repo: repo(),
       storage: storage_backend(),
       lineage: lineage_enabled?(),
+      lineage_ir: lineage_ir_enabled?(),
       async_default: async_default?(),
-      oban: oban_config()
+      oban: oban_config(),
+      run_index_adapter: run_index_adapter()
     }
   end
 
@@ -112,11 +118,27 @@ defmodule FlowStone.Config do
   end
 
   @doc """
+  Check if LineageIR emission is enabled.
+  """
+  @spec lineage_ir_enabled?() :: boolean()
+  def lineage_ir_enabled? do
+    Application.get_env(:flowstone, :lineage_ir, true)
+  end
+
+  @doc """
   Check if async execution is the default.
   """
   @spec async_default?() :: boolean()
   def async_default? do
     Application.get_env(:flowstone, :async_default, false)
+  end
+
+  @doc """
+  Get the configured RunIndex adapter.
+  """
+  @spec run_index_adapter() :: module()
+  def run_index_adapter do
+    Application.get_env(:flowstone, :run_index_adapter, FlowStone.RunIndex.Adapters.Noop)
   end
 
   @doc """

@@ -35,9 +35,22 @@ defmodule FlowStone.API do
   - `partition` - The partition key (default: `:default`)
   - `storage` - Override the storage backend
   - `force` - Re-run even if cached (default: `false`)
+  - `metadata` - Extra metadata propagated to execution context and observability
+  - `trace_id` - Override the trace id used for lineage/run indexing
   """
 
-  alias FlowStone.{Context, DAG, Error, IO, Materializer, Registry}
+  alias FlowStone.{
+    Context,
+    DAG,
+    Error,
+    ExecutionMetadata,
+    IO,
+    LineageEmitter,
+    Materializer,
+    Registry,
+    RunIndex
+  }
+
   alias FlowStone.IO.Memory, as: IOMemory
 
   @default_partition :default
@@ -67,6 +80,7 @@ defmodule FlowStone.API do
   - `with_deps` - Run missing dependencies first (default: `true`)
   - `timeout` - Execution timeout in ms (default: 300_000)
   - `async` - Run via Oban job queue (default: `false`)
+  - `metadata` - Metadata for lineage and run indexing (plan_id, trace_id, work_id, etc.)
 
   ## Returns
 
@@ -373,12 +387,9 @@ defmodule FlowStone.API do
     registry = registry_for_pipeline(pipeline)
 
     # Ensure registry is started
-    case Process.whereis(registry) do
-      nil ->
-        {:ok, _pid} = Registry.start_link(name: registry)
-
-      _pid ->
-        :ok
+    case Registry.start_link(name: registry) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
     end
 
     # Register assets if not already registered
@@ -394,12 +405,9 @@ defmodule FlowStone.API do
     # Ensure IO manager is started
     io_agent = io_agent_for_pipeline(pipeline)
 
-    case Process.whereis(io_agent) do
-      nil ->
-        {:ok, _pid} = IOMemory.start_link(name: io_agent)
-
-      _pid ->
-        :ok
+    case IOMemory.start_link(name: io_agent) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
     end
 
     :ok
@@ -433,36 +441,62 @@ defmodule FlowStone.API do
 
   defp run_with_deps(pipeline, asset, partition, opts) do
     assets = pipeline.__flowstone_assets__()
+    run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
+    meta = run_meta(opts, run_id)
+    started_at = DateTime.utc_now()
 
     case DAG.from_assets(assets) do
       {:ok, dag} ->
-        run_deps_in_order(pipeline, asset, partition, opts, dag)
+        _ = RunIndex.write_run(run_attrs(meta, partition, "running", started_at), opts)
+
+        result = run_deps_in_order(pipeline, asset, partition, opts, dag, run_id)
+        finish_run_index(result, meta, partition, started_at, opts)
+        result
 
       {:error, reason} ->
         {:error, Error.validation_error(asset.name, reason)}
     end
   end
 
-  defp run_deps_in_order(pipeline, asset, partition, opts, dag) do
+  defp run_deps_in_order(pipeline, asset, partition, opts, dag, run_id) do
     registry = registry_for_pipeline(pipeline)
     io_opts = io_opts_for_pipeline(pipeline)
     deps_to_run = dependencies_for(asset.name, dag)
-    run_id = Ecto.UUID.generate()
-    force? = Keyword.get(opts, :force, false)
+
+    run_context = %{
+      pipeline: pipeline,
+      target_name: asset.name,
+      partition: partition,
+      run_id: run_id,
+      registry: registry,
+      io_opts: io_opts,
+      force?: Keyword.get(opts, :force, false),
+      opts: opts
+    }
 
     Enum.reduce_while(deps_to_run, {:ok, nil}, fn dep_name, _acc ->
-      run_dep_step(pipeline, asset.name, dep_name, partition, run_id, registry, io_opts, force?)
+      run_dep_step(dep_name, run_context)
     end)
   end
 
-  defp run_dep_step(pipeline, target_name, dep_name, partition, run_id, registry, io_opts, force?) do
-    should_force = force? and dep_name == target_name
+  defp run_dep_step(dep_name, run_context) do
+    should_force = run_context.force? and dep_name == run_context.target_name
 
-    if not should_force and cached?(pipeline, dep_name, partition) do
+    if not should_force and cached?(run_context.pipeline, dep_name, run_context.partition) do
       {:cont, {:ok, :cached}}
     else
-      result = run_single_by_name(pipeline, dep_name, partition, run_id, registry, io_opts)
-      handle_dep_result(dep_name, target_name, result)
+      result =
+        run_single_by_name(
+          run_context.pipeline,
+          dep_name,
+          run_context.partition,
+          run_context.run_id,
+          run_context.registry,
+          run_context.io_opts,
+          run_context.opts
+        )
+
+      handle_dep_result(dep_name, run_context.target_name, result)
     end
   end
 
@@ -476,6 +510,9 @@ defmodule FlowStone.API do
     registry = registry_for_pipeline(pipeline)
     io_opts = io_opts_for_pipeline(pipeline)
     run_id = Keyword.get_lazy(opts, :run_id, &Ecto.UUID.generate/0)
+    meta = run_meta(opts, run_id)
+    started_at = DateTime.utc_now()
+    _ = RunIndex.write_run(run_attrs(meta, partition, "running", started_at), opts)
 
     # Check dependencies are available
     deps = asset.depends_on || []
@@ -486,16 +523,22 @@ defmodule FlowStone.API do
       end)
 
     if Enum.empty?(missing_deps) do
-      run_single_by_name(pipeline, asset.name, partition, run_id, registry, io_opts)
+      result =
+        run_single_by_name(pipeline, asset.name, partition, run_id, registry, io_opts, opts)
+
+      finish_run_index(result, meta, partition, started_at, opts)
+      result
     else
-      {:error, Error.dependency_not_ready(asset.name, missing_deps)}
+      error = Error.dependency_not_ready(asset.name, missing_deps)
+      finish_run_index({:error, error}, meta, partition, started_at, opts)
+      {:error, error}
     end
   end
 
-  defp run_single_by_name(pipeline, asset_name, partition, run_id, registry, io_opts) do
+  defp run_single_by_name(pipeline, asset_name, partition, run_id, registry, io_opts, opts) do
     with {:ok, asset} <- fetch_from_registry(pipeline, asset_name, registry),
          {:ok, deps_map} <- load_deps(asset, partition, io_opts) do
-      execute_and_store(asset, asset_name, partition, run_id, deps_map, io_opts)
+      execute_and_store(asset, asset_name, partition, run_id, deps_map, io_opts, opts)
     end
   end
 
@@ -510,16 +553,88 @@ defmodule FlowStone.API do
     end
   end
 
-  defp execute_and_store(asset, asset_name, partition, run_id, deps_map, io_opts) do
-    context = Context.build(asset, partition, run_id)
+  defp execute_and_store(asset, asset_name, partition, run_id, deps_map, io_opts, opts) do
+    context = Context.build(asset, partition, run_id, metadata: metadata_from_opts(opts))
+    meta = ExecutionMetadata.build(asset, context, opts)
+    {:ok, span_id} = LineageEmitter.start_span(asset, context, meta, opts)
+    step_record_id = Ecto.UUID.generate()
+    started_at = context.started_at
+
+    _ =
+      RunIndex.write_step(
+        step_attrs(meta, partition, step_record_id, span_id, "running", started_at),
+        opts
+      )
 
     case Materializer.execute(asset, context, deps_map) do
       {:ok, result} ->
         :ok = IO.store(asset_name, result, partition, io_opts)
+
+        {:ok, artifact_ref} =
+          LineageEmitter.emit_artifact(asset, context, meta, span_id, result, io_opts, opts)
+
+        LineageEmitter.finish_span(asset, context, meta, span_id, "succeeded", nil, opts)
+        finished_at = DateTime.utc_now()
+
+        _ =
+          RunIndex.write_step(
+            step_attrs(meta, partition, step_record_id, span_id, "succeeded", started_at,
+              finished_at: finished_at,
+              output_artifact_refs: artifact_refs([artifact_ref])
+            ),
+            opts
+          )
+
         {:ok, result}
 
-      other ->
-        other
+      {:error, %Error{} = err} ->
+        status = error_status(err)
+        LineageEmitter.finish_span(asset, context, meta, span_id, status, err, opts)
+
+        finish_step_record(
+          meta,
+          partition,
+          step_record_id,
+          span_id,
+          status,
+          started_at,
+          err,
+          opts
+        )
+
+        {:error, err}
+
+      {:skipped, _reason} = result ->
+        LineageEmitter.finish_span(asset, context, meta, span_id, "skipped", nil, opts)
+
+        finish_step_record(
+          meta,
+          partition,
+          step_record_id,
+          span_id,
+          "skipped",
+          started_at,
+          nil,
+          opts
+        )
+
+        result
+
+      {:parallel_pending, _info} = result ->
+        LineageEmitter.finish_span(asset, context, meta, span_id, "running", nil, opts)
+
+        finish_step_record(
+          meta,
+          partition,
+          step_record_id,
+          span_id,
+          "running",
+          started_at,
+          nil,
+          opts
+        )
+
+        result
     end
   end
 
@@ -633,4 +748,184 @@ defmodule FlowStone.API do
     render_tree(child, dependents, prefix <> child_prefix)
     |> String.replace_prefix(prefix <> child_prefix, prefix <> connector)
   end
+
+  defp metadata_from_opts(opts) do
+    base = Keyword.get(opts, :metadata, %{})
+
+    base
+    |> maybe_put(:trace_id, Keyword.get(opts, :trace_id))
+    |> maybe_put(:work_id, Keyword.get(opts, :work_id))
+    |> maybe_put(:plan_id, Keyword.get(opts, :plan_id))
+    |> maybe_put(:plan_version, Keyword.get(opts, :plan_version))
+    |> maybe_put(:plan_hash, Keyword.get(opts, :plan_hash))
+    |> maybe_put(:plan_ref, Keyword.get(opts, :plan_ref))
+    |> maybe_put(:session_id, Keyword.get(opts, :session_id))
+    |> maybe_put(:actor_type, Keyword.get(opts, :actor_type))
+    |> maybe_put(:actor_id, Keyword.get(opts, :actor_id))
+    |> maybe_put(:tenant_id, Keyword.get(opts, :tenant_id))
+  end
+
+  defp run_meta(opts, run_id) do
+    meta = metadata_from_opts(opts)
+
+    %{
+      run_id: run_id,
+      trace_id: Map.get(meta, :trace_id) || run_id,
+      work_id: Map.get(meta, :work_id),
+      plan_id: Map.get(meta, :plan_id),
+      plan_version: Map.get(meta, :plan_version),
+      plan_hash: Map.get(meta, :plan_hash),
+      plan_ref: Map.get(meta, :plan_ref),
+      session_id: Map.get(meta, :session_id),
+      actor_type: Map.get(meta, :actor_type),
+      actor_id: Map.get(meta, :actor_id),
+      tenant_id: Map.get(meta, :tenant_id)
+    }
+  end
+
+  defp finish_run_index(result, meta, partition, started_at, opts) do
+    finished_at = DateTime.utc_now()
+
+    {status, error} =
+      case result do
+        {:ok, :skipped} -> {"skipped", nil}
+        {:ok, _} -> {"succeeded", nil}
+        {:error, err} -> {error_status(err), err}
+      end
+
+    {error_type, error_message, error_details} = error_fields(error)
+
+    _ =
+      RunIndex.write_run(
+        run_attrs(meta, partition, status, started_at,
+          finished_at: finished_at,
+          status_reason: status_reason(error),
+          error_type: error_type,
+          error_message: error_message,
+          error_details: error_details
+        ),
+        opts
+      )
+
+    :ok
+  end
+
+  defp finish_step_record(
+         meta,
+         partition,
+         step_record_id,
+         span_id,
+         status,
+         started_at,
+         error,
+         opts
+       ) do
+    {error_type, error_message, error_details} = error_fields(error)
+
+    extra =
+      %{}
+      |> maybe_put(:finished_at, finished_at_for(status))
+      |> maybe_put(:status_reason, status_reason(error))
+      |> maybe_put(:error_type, error_type)
+      |> maybe_put(:error_message, error_message)
+      |> maybe_put(:error_details, error_details)
+
+    _ =
+      RunIndex.write_step(
+        step_attrs(meta, partition, step_record_id, span_id, status, started_at, extra),
+        opts
+      )
+
+    :ok
+  end
+
+  defp finished_at_for("running"), do: nil
+  defp finished_at_for(_status), do: DateTime.utc_now()
+
+  defp error_status(%Error{} = error) do
+    if Error.waiting_approval?(error), do: "paused", else: "failed"
+  end
+
+  defp error_status(_), do: "failed"
+
+  defp status_reason(nil), do: nil
+  defp status_reason(%Error{} = err), do: if(Error.waiting_approval?(err), do: "waiting_approval")
+  defp status_reason(_), do: nil
+
+  defp error_fields(nil), do: {nil, nil, nil}
+
+  defp error_fields(%Error{} = error) do
+    {to_string(error.type), error.message, error.context}
+  end
+
+  defp error_fields(%_{} = error) do
+    {error.__struct__ |> Module.split() |> List.last(), Exception.message(error), %{}}
+  end
+
+  defp error_fields(error) do
+    {"error", inspect(error), %{}}
+  end
+
+  defp run_attrs(meta, partition, status, started_at, extra \\ %{}) do
+    Map.merge(
+      %{
+        id: meta.run_id,
+        runtime: "flowstone",
+        runtime_ref: to_string(meta.run_id),
+        status: status,
+        plan_id: meta.plan_id,
+        plan_version: meta.plan_version,
+        plan_hash: meta.plan_hash,
+        plan_ref: meta.plan_ref,
+        trace_id: meta.trace_id,
+        work_id: meta.work_id,
+        session_id: meta.session_id,
+        actor_type: meta.actor_type,
+        actor_id: meta.actor_id,
+        tenant_id: meta.tenant_id,
+        inputs: %{partition: FlowStone.Partition.serialize(partition)},
+        started_at: started_at
+      },
+      normalize_extra(extra)
+    )
+  end
+
+  defp step_attrs(meta, partition, step_record_id, span_id, status, started_at, extra \\ %{}) do
+    action_module =
+      case meta.action_module do
+        nil -> nil
+        module -> inspect(module)
+      end
+
+    Map.merge(
+      %{
+        id: step_record_id,
+        run_id: meta.run_id,
+        step_id: meta.step_id,
+        step_key: meta.step_key,
+        action_name: meta.action_name || to_string(meta.step_key),
+        action_module: action_module,
+        tool_name: meta.tool_name,
+        status: status,
+        trace_id: meta.trace_id,
+        span_id: span_id,
+        work_id: meta.work_id,
+        inputs: %{partition: FlowStone.Partition.serialize(partition)},
+        started_at: started_at
+      },
+      normalize_extra(extra)
+    )
+  end
+
+  defp artifact_refs(refs) do
+    refs
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&LineageIR.Serialization.to_map/1)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp normalize_extra(extra) when is_map(extra), do: extra
+  defp normalize_extra(extra) when is_list(extra), do: Map.new(extra)
 end

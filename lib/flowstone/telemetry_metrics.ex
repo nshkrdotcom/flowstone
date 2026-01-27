@@ -18,7 +18,9 @@ defmodule FlowStone.TelemetryMetrics do
       counter("flowstone.materialization.start",
         event_name: [:flowstone, :materialization, :start]
       ),
-      counter("flowstone.materialization.stop", event_name: [:flowstone, :materialization, :stop]),
+      counter("flowstone.materialization.stop",
+        event_name: [:flowstone, :materialization, :stop]
+      ),
       counter("flowstone.materialization.exception",
         event_name: [:flowstone, :materialization, :exception]
       ),
@@ -32,7 +34,9 @@ defmodule FlowStone.TelemetryMetrics do
         measurement: :duration,
         unit: {:native, :millisecond}
       ),
-      counter("flowstone.checkpoint.requested", event_name: [:flowstone, :checkpoint, :requested]),
+      counter("flowstone.checkpoint.requested",
+        event_name: [:flowstone, :checkpoint, :requested]
+      ),
       counter("flowstone.checkpoint.approved", event_name: [:flowstone, :checkpoint, :approved]),
       counter("flowstone.checkpoint.rejected", event_name: [:flowstone, :checkpoint, :rejected]),
       counter("flowstone.checkpoint.timeout", event_name: [:flowstone, :checkpoint, :timeout])

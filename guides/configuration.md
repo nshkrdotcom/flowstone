@@ -62,6 +62,15 @@ mix ecto.migrate
 
 ## Configuration Options
 
+| Option | Default | Description |
+|--------|---------|-------------|
+| `:repo` | `nil` | Ecto repo for persistence |
+| `:storage` | Auto | Storage backend (`:memory`, `:postgres`, `:s3`, `:parquet`) |
+| `:lineage` | Auto | Enable lineage tracking (true if repo configured) |
+| `:lineage_ir` | `true` | Emit LineageIR spans and artifacts |
+| `:async_default` | `false` | Default async execution mode |
+| `:run_index_adapter` | `FlowStone.RunIndex.Adapters.Noop` | RunIndex sink adapter |
+
 ### Full Configuration
 
 ```elixir
@@ -75,6 +84,12 @@ config :flowstone,
 
   # Enable lineage tracking (auto-enabled when repo is set)
   lineage: true,
+
+  # Emit LineageIR spans/artifacts (requires LineageIR sink configuration)
+  lineage_ir: true,
+
+  # RunIndex adapter (use Ecto adapter for Command-style tables)
+  run_index_adapter: FlowStone.RunIndex.Adapters.Ecto,
 
   # Default execution mode (sync vs async)
   async_default: false,
@@ -181,6 +196,7 @@ config :flowstone,
   repo: MyApp.Repo,
   storage: :postgres,
   lineage: true,
+  lineage_ir: true,
   async_default: true  # Use Oban for background execution
 ```
 
@@ -230,6 +246,28 @@ config :flowstone, :io_managers, %{
 }
 
 config :flowstone, :default_io_manager, :postgres
+```
+
+## LineageIR Emission
+
+FlowStone emits LineageIR spans and artifacts when enabled:
+
+```elixir
+config :flowstone, lineage_ir: true
+
+config :lineage_ir,
+  sink_adapter: LineageIR.Sink.Adapters.Ecto,
+  ecto_repo: MyApp.Repo
+```
+
+## RunIndex Emission
+
+Emit RunIndex writes into a `run_index` schema (shared query layer):
+
+```elixir
+config :flowstone,
+  run_index_adapter: FlowStone.RunIndex.Adapters.Ecto,
+  run_index_repo: MyApp.Repo
 ```
 
 ## Application Supervision

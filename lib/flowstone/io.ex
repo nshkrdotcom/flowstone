@@ -52,6 +52,18 @@ defmodule FlowStone.IO do
     manager.delete(asset, partition, config)
   end
 
+  @spec metadata(asset :: atom(), partition :: term(), opts :: keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def metadata(asset, partition, opts \\ []) do
+    {manager, config} = resolve_manager(opts)
+
+    if function_exported?(manager, :metadata, 3) do
+      manager.metadata(asset, partition, config)
+    else
+      {:error, :not_supported}
+    end
+  end
+
   @spec exists?(asset :: atom(), partition :: term(), opts :: keyword()) :: boolean()
   def exists?(asset, partition, opts \\ []) do
     {manager, config} = resolve_manager(opts)

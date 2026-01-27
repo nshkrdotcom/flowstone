@@ -26,6 +26,19 @@ defmodule MyApp.Pipeline do
 end
 ```
 
+### 1.1) Plans (Jido.Plan)
+
+FlowStone can compile `Jido.Plan` graphs into assets for execution:
+
+```elixir
+plan =
+  Jido.Plan.new(context: %{user_id: "user-1"})
+  |> Jido.Plan.add(:fetch, MyApp.Actions.Fetch)
+  |> Jido.Plan.add(:transform, MyApp.Actions.Transform, depends_on: :fetch)
+
+{:ok, result} = FlowStone.PlanRunner.run(plan, :transform)
+```
+
 ### 2) Materialization
 
 **Materialization** computes and stores an asset’s value for a specific partition.
@@ -102,6 +115,9 @@ FlowStone records lineage edges after successful materialization and exposes que
 - impact analysis
 
 Repo-backed lineage uses recursive CTEs with bounded depth; there is an in-memory fallback when a lineage server is running.
+
+When enabled, FlowStone also emits LineageIR spans/artifacts and RunIndex writes for cross-runtime lineage
+and run/step queries.
 
 Implementation: `lib/flowstone/lineage_persistence.ex`.
 

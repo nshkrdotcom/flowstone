@@ -4,7 +4,7 @@ This guide walks you through building your first FlowStone pipeline.
 
 ## Prerequisites
 
-- Elixir 1.15 or later
+- Elixir 1.19 or later
 - PostgreSQL (optional, for persistence)
 
 ## Installation
@@ -206,6 +206,21 @@ MyApp.NumberPipeline.exists?(:sum)
 FlowStone.assets(MyApp.NumberPipeline)
 MyApp.NumberPipeline.assets()
 ```
+
+## Running Jido Plans
+
+FlowStone can compile and run `Jido.Plan` graphs for agent workflows:
+
+```elixir
+plan =
+  Jido.Plan.new(context: %{user_id: "user-1"})
+  |> Jido.Plan.add(:fetch, MyApp.Actions.Fetch)
+  |> Jido.Plan.add(:transform, MyApp.Actions.Transform, depends_on: :fetch)
+
+{:ok, result} = FlowStone.PlanRunner.run(plan, :transform)
+```
+
+Dependency outputs are available to actions via `context.flowstone.deps`.
 
 ## DSL Shortcuts
 

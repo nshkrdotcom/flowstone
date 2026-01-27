@@ -153,11 +153,10 @@ defmodule FlowStone.Materializer do
     )
 
     {:error,
-     FlowStone.Error.execution_error(
+     FlowStone.Error.waiting_approval(
        asset.name,
        context.partition,
-       wrap(:waiting_approval),
-       []
+       approval_attrs
      )}
   end
 

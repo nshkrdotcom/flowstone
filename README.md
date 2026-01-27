@@ -190,6 +190,22 @@ true = MyApp.Pipeline.exists?(:sum)
 [:greeting, :numbers, :doubled, :sum] = MyApp.Pipeline.assets()
 ```
 
+## Jido Plan Execution
+
+FlowStone can compile and run `Jido.Plan` graphs directly:
+
+```elixir
+plan =
+  Jido.Plan.new(context: %{user_id: "user-1"})
+  |> Jido.Plan.add(:fetch, MyApp.Actions.Fetch)
+  |> Jido.Plan.add(:transform, MyApp.Actions.Transform, depends_on: :fetch)
+
+{:ok, result} = FlowStone.PlanRunner.run(plan, :transform)
+```
+
+Plan steps become assets (`depends_on` maps directly), and dependency outputs are available in
+`context.flowstone.deps` for downstream actions.
+
 ## Configuration
 
 FlowStone works with zero configuration, but can be customized:
@@ -205,6 +221,8 @@ config :flowstone,
   repo: MyApp.Repo,
   storage: :postgres,    # :memory (default), :postgres, :s3, :parquet
   lineage: true,         # auto-enabled when repo is set
+  lineage_ir: true,      # emit LineageIR spans/artifacts
+  run_index_adapter: FlowStone.RunIndex.Adapters.Ecto,
   async_default: false   # use sync execution by default
 ```
 

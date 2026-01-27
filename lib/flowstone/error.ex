@@ -56,6 +56,30 @@ defmodule FlowStone.Error do
   end
 
   @doc """
+  Create an error for when an asset is waiting on approval.
+  """
+  def waiting_approval(asset, partition, approval_attrs \\ %{}) do
+    %__MODULE__{
+      type: :waiting_approval,
+      message: "Waiting for approval",
+      context: %{asset: asset, partition: partition, approval: approval_attrs},
+      retryable: true,
+      original: nil
+    }
+  end
+
+  @doc """
+  Returns true when an error represents a waiting approval state.
+  """
+  @spec waiting_approval?(t() | term()) :: boolean()
+  def waiting_approval?(%__MODULE__{type: :waiting_approval}), do: true
+
+  def waiting_approval?(%__MODULE__{original: %RuntimeError{message: "waiting_approval"}}),
+    do: true
+
+  def waiting_approval?(_), do: false
+
+  @doc """
   Create an error for when dependencies are not ready.
   """
   def dependency_not_ready(asset, missing) do

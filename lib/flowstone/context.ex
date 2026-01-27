@@ -33,6 +33,20 @@ defmodule FlowStone.Context do
     :batch_input
   ]
 
+  @type t :: %__MODULE__{
+          asset: FlowStone.Asset.name(),
+          partition: FlowStone.Partition.partition(),
+          run_id: String.t(),
+          resources: map(),
+          metadata: map(),
+          started_at: DateTime.t(),
+          scatter_key: term() | nil,
+          batch_index: non_neg_integer() | nil,
+          batch_count: non_neg_integer() | nil,
+          batch_items: [term()] | nil,
+          batch_input: term() | nil
+        }
+
   @doc """
   Build a context for an asset, injecting only required resources.
   """

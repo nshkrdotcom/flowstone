@@ -7,10 +7,13 @@ defmodule FlowStone.Executor do
     AuditLogContext,
     Context,
     Error,
+    ExecutionMetadata,
+    LineageEmitter,
     Materializer,
     Parallel,
     Registry,
-    RouteDecisions
+    RouteDecisions,
+    RunIndex
   }
 
   @spec materialize(atom(), keyword()) :: {:ok, term()} | {:error, Error.t()} | {:error, term()}
@@ -43,11 +46,25 @@ defmodule FlowStone.Executor do
          context <-
            Context.build(asset, partition, run_id,
              resource_server: resource_server,
-             metadata: %{route_branches: route_branches(asset, registry)}
+             metadata:
+               opts
+               |> Keyword.get(:metadata, %{})
+               |> Map.put(:route_branches, route_branches(asset, registry))
            ) do
       start_time = System.monotonic_time(:millisecond)
       telemetry_start(asset.name, partition, run_id)
       record_start(asset.name, partition, run_id, mat_store, use_repo)
+      meta = ExecutionMetadata.build(asset, context, opts)
+      {:ok, span_id} = LineageEmitter.start_span(asset, context, meta, opts)
+      step_record_id = Ecto.UUID.generate()
+      started_at = context.started_at
+      _ = RunIndex.write_run(run_attrs(meta, partition, "running", started_at), opts)
+
+      _ =
+        RunIndex.write_step(
+          step_attrs(meta, partition, step_record_id, span_id, "running", started_at),
+          opts
+        )
 
       case Materializer.execute(asset, context, deps) do
         {:ok, result} ->
@@ -57,6 +74,32 @@ defmodule FlowStone.Executor do
           telemetry_stop(asset.name, partition, run_id, duration)
           maybe_audit(asset.name, partition, run_id, use_repo)
           record_lineage(asset.name, partition, run_id, deps, lineage_server, use_repo)
+
+          {:ok, artifact_ref} =
+            LineageEmitter.emit_artifact(asset, context, meta, span_id, result, io_opts, opts)
+
+          LineageEmitter.finish_span(asset, context, meta, span_id, "succeeded", nil, opts)
+
+          finished_at = DateTime.utc_now()
+
+          _ =
+            RunIndex.write_step(
+              step_attrs(meta, partition, step_record_id, span_id, "succeeded", started_at,
+                finished_at: finished_at,
+                output_artifact_refs: artifact_refs([artifact_ref])
+              ),
+              opts
+            )
+
+          _ =
+            RunIndex.write_run(
+              run_attrs(meta, partition, "succeeded", started_at,
+                finished_at: finished_at,
+                output_artifact_refs: artifact_refs([artifact_ref])
+              ),
+              opts
+            )
+
           {:ok, result}
 
         {:parallel_pending, _info} ->
@@ -71,15 +114,25 @@ defmodule FlowStone.Executor do
                  partition: partition
                ) do
             {:ok, _execution} ->
+              _ =
+                RunIndex.write_step(
+                  step_attrs(meta, partition, step_record_id, span_id, "running", started_at),
+                  opts
+                )
+
               {:ok, :parallel_pending}
 
             {:error, %Error{} = err} ->
+              LineageEmitter.finish_span(asset, context, meta, span_id, "failed", err, opts)
+              finish_run_index(meta, partition, step_record_id, span_id, started_at, err, opts)
               record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
               telemetry_exception(asset.name, partition, run_id, err)
               {:error, err}
 
             {:error, reason} ->
               err = Error.execution_error(asset.name, partition, wrap(reason), [])
+              LineageEmitter.finish_span(asset, context, meta, span_id, "failed", err, opts)
+              finish_run_index(meta, partition, step_record_id, span_id, started_at, err, opts)
               record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
               telemetry_exception(asset.name, partition, run_id, err)
               {:error, err}
@@ -89,9 +142,28 @@ defmodule FlowStone.Executor do
           duration = System.monotonic_time(:millisecond) - start_time
           record_skipped(asset.name, partition, run_id, duration, mat_store, use_repo)
           telemetry_stop(asset.name, partition, run_id, duration)
+          LineageEmitter.finish_span(asset, context, meta, span_id, "skipped", nil, opts)
+          finished_at = DateTime.utc_now()
+
+          _ =
+            RunIndex.write_step(
+              step_attrs(meta, partition, step_record_id, span_id, "skipped", started_at,
+                finished_at: finished_at
+              ),
+              opts
+            )
+
+          _ =
+            RunIndex.write_run(
+              run_attrs(meta, partition, "skipped", started_at, finished_at: finished_at),
+              opts
+            )
+
           {:ok, :skipped}
 
         {:error, %Error{} = err} ->
+          LineageEmitter.finish_span(asset, context, meta, span_id, error_status(err), err, opts)
+          finish_run_index(meta, partition, step_record_id, span_id, started_at, err, opts)
           record_failure(asset.name, partition, run_id, err, mat_store, use_repo)
           telemetry_exception(asset.name, partition, run_id, err)
           {:error, err}
@@ -248,4 +320,108 @@ defmodule FlowStone.Executor do
   end
 
   defp wrap(reason), do: Error.wrap_reason(reason)
+
+  defp error_status(%Error{} = error) do
+    if Error.waiting_approval?(error), do: "paused", else: "failed"
+  end
+
+  defp finish_run_index(meta, partition, step_record_id, span_id, started_at, err, opts) do
+    finished_at = DateTime.utc_now()
+    status = error_status(err)
+    {error_type, error_message, error_details} = error_fields(err)
+
+    _ =
+      RunIndex.write_step(
+        step_attrs(meta, partition, step_record_id, span_id, status, started_at,
+          finished_at: finished_at,
+          error_type: error_type,
+          error_message: error_message,
+          error_details: error_details,
+          status_reason: status_reason(err)
+        ),
+        opts
+      )
+
+    _ =
+      RunIndex.write_run(
+        run_attrs(meta, partition, status, started_at,
+          finished_at: finished_at,
+          error_type: error_type,
+          error_message: error_message,
+          error_details: error_details,
+          status_reason: status_reason(err)
+        ),
+        opts
+      )
+
+    :ok
+  end
+
+  defp status_reason(%Error{} = err) do
+    if Error.waiting_approval?(err), do: "waiting_approval", else: nil
+  end
+
+  defp error_fields(%Error{} = error) do
+    {to_string(error.type), error.message, error.context}
+  end
+
+  defp run_attrs(meta, partition, status, started_at, extra \\ %{}) do
+    Map.merge(
+      %{
+        id: meta.run_id,
+        runtime: "flowstone",
+        runtime_ref: to_string(meta.run_id),
+        status: status,
+        plan_id: meta.plan_id,
+        plan_version: meta.plan_version,
+        plan_hash: meta.plan_hash,
+        plan_ref: meta.plan_ref,
+        trace_id: meta.trace_id,
+        work_id: meta.work_id,
+        session_id: meta.session_id,
+        actor_type: meta.actor_type,
+        actor_id: meta.actor_id,
+        tenant_id: meta.tenant_id,
+        inputs: %{partition: FlowStone.Partition.serialize(partition)},
+        started_at: started_at
+      },
+      normalize_extra(extra)
+    )
+  end
+
+  defp step_attrs(meta, partition, step_record_id, span_id, status, started_at, extra \\ %{}) do
+    action_module =
+      case meta.action_module do
+        nil -> nil
+        module -> inspect(module)
+      end
+
+    Map.merge(
+      %{
+        id: step_record_id,
+        run_id: meta.run_id,
+        step_id: meta.step_id,
+        step_key: meta.step_key,
+        action_name: meta.action_name || to_string(meta.step_key),
+        action_module: action_module,
+        tool_name: meta.tool_name,
+        status: status,
+        trace_id: meta.trace_id,
+        span_id: span_id,
+        work_id: meta.work_id,
+        inputs: %{partition: FlowStone.Partition.serialize(partition)},
+        started_at: started_at
+      },
+      normalize_extra(extra)
+    )
+  end
+
+  defp artifact_refs(refs) do
+    refs
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&LineageIR.Serialization.to_map/1)
+  end
+
+  defp normalize_extra(extra) when is_map(extra), do: extra
+  defp normalize_extra(extra) when is_list(extra), do: Map.new(extra)
 end

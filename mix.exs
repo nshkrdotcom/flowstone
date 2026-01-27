@@ -8,7 +8,7 @@ defmodule FlowStone.MixProject do
     [
       app: :flowstone,
       version: @version,
-      elixir: "~> 1.15",
+      elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
@@ -60,6 +60,8 @@ defmodule FlowStone.MixProject do
       {:oban, "~> 2.18"},
       {:jason, "~> 1.4"},
       {:plug_crypto, "~> 2.0"},
+      {:jido_action, path: "../jido_action"},
+      {:lineage_ir, path: "../../North-Shore-AI/lineage_ir"},
 
       # Phoenix / LiveView (optional for UI)
       {:phoenix, "~> 1.7", optional: true},
@@ -158,7 +160,9 @@ defmodule FlowStone.MixProject do
         "High-Level API": [
           FlowStone,
           FlowStone.API,
-          FlowStone.Config
+          FlowStone.Config,
+          FlowStone.PlanCompiler,
+          FlowStone.PlanRunner
         ],
         Core: [
           FlowStone.Asset,
@@ -228,7 +232,8 @@ defmodule FlowStone.MixProject do
         Observability: [
           FlowStone.Telemetry,
           FlowStone.Logger,
-          FlowStone.AuditLog
+          FlowStone.AuditLog,
+          FlowStone.RunIndex
         ],
         Errors: [
           FlowStone.Error,

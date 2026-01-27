@@ -28,6 +28,7 @@ This folder contains runnable examples that exercise core FlowStone features end
 - `core_example.exs` — registry + IO + dependency execution.
 - `backfill_example.exs` — partitioned asset metadata, partition_fn, backfill skipping.
 - `approval_example.exs` — wait-for-approval flow, approvals listing/approval.
+- `plan_runner_example.exs` — Jido.Plan compilation and execution.
 - `schedule_example.exs` — cron scheduling with dynamic partitions and manual trigger.
 - `telemetry_example.exs` — materialization telemetry tap.
 - `postgres_io_example.exs` — Postgres IO manager with composite partitions.
