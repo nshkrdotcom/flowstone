@@ -1,14 +1,14 @@
 defmodule FlowStone.MixProject do
   use Mix.Project
 
-  @version "0.5.2"
+  @version "0.6.0"
   @source_url "https://github.com/nshkrdotcom/flowstone"
 
   def project do
     [
       app: :flowstone,
       version: @version,
-      elixir: "~> 1.19",
+      elixir: "~> 1.18.4",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
@@ -60,8 +60,8 @@ defmodule FlowStone.MixProject do
       {:oban, "~> 2.18"},
       {:jason, "~> 1.4"},
       {:plug_crypto, "~> 2.0"},
-      {:jido_action, path: "../jido_action"},
-      {:lineage_ir, path: "../../North-Shore-AI/lineage_ir"},
+      {:jido_action, "~> 2.0.0-rc.1"},
+      {:lineage_ir, "~> 0.1"},
 
       # Phoenix / LiveView (optional for UI)
       {:phoenix, "~> 1.7", optional: true},
@@ -88,14 +88,14 @@ defmodule FlowStone.MixProject do
       {:ex_aws_dynamo, "~> 4.2", optional: true},
 
       # Testing
-      {:supertester, path: "../supertester", only: :test},
+      {:supertester, "~> 0.5.1", only: :test},
       {:mox, "~> 1.1", only: :test},
       {:stream_data, "~> 1.1", only: [:dev, :test]},
       {:excoveralls, "~> 0.18", only: :test},
       {:crontab, "~> 1.1"},
 
       # Development
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
@@ -118,7 +118,8 @@ defmodule FlowStone.MixProject do
   defp package do
     [
       name: "flowstone",
-      files: ~w(lib priv assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md),
+      files:
+        ~w(lib priv assets .formatter.exs mix.exs README.md LICENSE CHANGELOG.md docs guides),
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
